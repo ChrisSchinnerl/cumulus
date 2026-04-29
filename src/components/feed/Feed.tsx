@@ -160,11 +160,12 @@ export function Feed() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   /**
-   * `siaKey`s of records currently in the viewer's own repo. Used in the
-   * Following tab to render "Saved" instead of "Save" for entries the viewer
-   * has already repinned. Populated alongside the feed load.
+   * Source URIs (the original at-uri of each repinned post) currently in the
+   * viewer's own repo. Used in the Following tab to render "Saved" instead
+   * of "Save" for entries the viewer has already repinned. Populated
+   * alongside the feed load.
    */
-  const [savedSiaKeys, setSavedSiaKeys] = useState<Set<string>>(new Set())
+  const [savedSourceUris, setSavedSourceUris] = useState<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
     if (!agent || !did) return
@@ -174,16 +175,18 @@ export function Feed() {
     try {
       // For Following tab, also load my own records in parallel so we know
       // which entries are already saved. Skipped for Mine tab (the entries
-      // *are* my own, so the question doesn't apply).
-      const myKeysPromise =
+      // *are* my own, so the question doesn't apply). We collect the
+      // `sourceUri` field from each of my records — that's the at-uri of
+      // the original post the save came from.
+      const mySourcesPromise =
         tab === 'following'
           ? listSharePosts(did, 100)
               .then(
                 (records) =>
                   new Set(
                     records
-                      .map((r) => r.value.siaKey)
-                      .filter((k): k is string => !!k),
+                      .map((r) => r.value.sourceUri)
+                      .filter((u): u is string => !!u),
                   ),
               )
               .catch(() => new Set<string>())
@@ -209,7 +212,7 @@ export function Feed() {
         },
       )
 
-      setSavedSiaKeys(await myKeysPromise)
+      setSavedSourceUris(await mySourcesPromise)
     } catch (e) {
       console.error('feed load failed:', e)
       setError(e instanceof Error ? e.message : 'Failed to load feed')
@@ -244,17 +247,31 @@ export function Feed() {
         const obj = await sdk.sharedObject(entry.post.shareUrl)
         siaKey = obj.id()
       }
-      await sdk.deleteObject(siaKey)
+      try {
+        await sdk.deleteObject(siaKey)
+      } catch (e) {
+        // Treat "object not found" as success — if the indexer doesn't
+        // know about it, the delete's intent is already satisfied. Lets us
+        // clean up orphan atproto records when the indexer state diverged
+        // (e.g. unpinned via another client, repos restored, etc.).
+        const msg = (e instanceof Error ? e.message : String(e)).toLowerCase()
+        if (!msg.includes('not found')) throw e
+      }
       await deleteSharePost(agent, entry.uri)
       setEntries((prev) =>
         prev ? prev.filter((e) => e.uri !== entry.uri) : prev,
       )
-      setSavedSiaKeys((prev) => {
-        if (!siaKey || !prev.has(siaKey)) return prev
-        const next = new Set(prev)
-        next.delete(siaKey)
-        return next
-      })
+      // If the deleted record was a repin, drop its source URI from the
+      // saved set so the original post in Following shows "Save" again.
+      const sourceUri = entry.post.sourceUri
+      if (sourceUri) {
+        setSavedSourceUris((prev) => {
+          if (!prev.has(sourceUri)) return prev
+          const next = new Set(prev)
+          next.delete(sourceUri)
+          return next
+        })
+      }
     },
     [agent, sdk],
   )
@@ -269,6 +286,11 @@ export function Feed() {
    * my repo. All metadata fields from the original (thumbnail, mimeType,
    * future show/season/episode, etc.) are preserved by spreading; only
    * `shareUrl`, `siaKey`, and `createdAt` are overridden.
+   *
+   * `sourceUri` propagates: if we're saving a post that itself was a save
+   * (already has `sourceUri` set), we keep that original URI rather than
+   * pointing at the intermediate save. This way the chain always credits
+   * the first creator, regardless of how many hops the post has taken.
    */
   const handleSave = useCallback(
     async (entry: FeedEntry): Promise<void> => {
@@ -280,16 +302,18 @@ export function Feed() {
       const siaKey = obj.id()
 
       const { $type: _type, ...rest } = entry.post
+      const sourceUri = rest.sourceUri ?? entry.uri
       await writeSharePost(agent, {
         ...rest,
         shareUrl: myShareUrl,
         siaKey,
         createdAt: new Date().toISOString(),
+        sourceUri,
       })
 
-      setSavedSiaKeys((prev) => {
+      setSavedSourceUris((prev) => {
         const next = new Set(prev)
-        next.add(siaKey)
+        next.add(sourceUri)
         return next
       })
     },
@@ -351,14 +375,12 @@ export function Feed() {
               size={e.post.size}
               createdAt={e.post.createdAt}
               shareUrl={e.post.shareUrl}
+              posterDid={e.author.did}
+              sourceUri={e.post.sourceUri}
               thumbnail={e.post.thumbnail}
               onDelete={tab === 'mine' ? () => handleDelete(e) : undefined}
               onSave={tab === 'following' ? () => handleSave(e) : undefined}
-              isSaved={
-                tab === 'following' && e.post.siaKey
-                  ? savedSiaKeys.has(e.post.siaKey)
-                  : false
-              }
+              isSaved={tab === 'following' && savedSourceUris.has(e.uri)}
             />
           ))}
         </div>

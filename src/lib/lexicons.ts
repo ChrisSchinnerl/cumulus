@@ -32,6 +32,13 @@ export type SharePost = {
    * the atproto record stays small.
    */
   thumbnail?: string
+  /**
+   * `at://` URI of the original record this post was repinned from. Set when
+   * a user clicks "Save" on someone else's share; absent on original uploads.
+   * Used internally to render the Save → Saved state in the Following feed —
+   * not displayed in the UI.
+   */
+  sourceUri?: string
 }
 
 /** A `SharePost` paired with its repo URI + CID (as returned by listRecords). */
@@ -56,6 +63,7 @@ export function isSharePost(value: unknown): value is SharePost {
     typeof v.size === 'number' &&
     typeof v.createdAt === 'string' &&
     (v.siaKey === undefined || typeof v.siaKey === 'string') &&
-    (v.thumbnail === undefined || typeof v.thumbnail === 'string')
+    (v.thumbnail === undefined || typeof v.thumbnail === 'string') &&
+    (v.sourceUri === undefined || typeof v.sourceUri === 'string')
   )
 }

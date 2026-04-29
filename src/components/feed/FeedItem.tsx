@@ -1,4 +1,6 @@
+import { AtUri } from '@atproto/api'
 import { useEffect, useState } from 'react'
+import { getProfileByDid } from '../../lib/atproto'
 import { registerStream, unregisterStream } from '../../lib/streaming'
 import { useAuthStore } from '../../stores/auth'
 
@@ -69,6 +71,14 @@ export type FeedItemProps = {
   createdAt: string
   /** Sia share URL — opaque pointer fed into `sdk.sharedObject(...)`. */
   shareUrl: string
+  /** DID of the user whose repo this post lives in (the poster). */
+  posterDid: string
+  /**
+   * `at://` URI of the original post this is a save of, if any. When the
+   * URI's DID differs from {@link posterDid}, the byline shows an
+   * "originally posted by @handle" attribution line.
+   */
+  sourceUri?: string
   /**
    * Optional inline preview (JPEG `data:` URL). Rendered above the metadata
    * row when present — typically only for image uploads.
@@ -108,6 +118,8 @@ export function FeedItem({
   size,
   createdAt,
   shareUrl,
+  posterDid,
+  sourceUri,
   thumbnail,
   onDelete,
   onSave,
@@ -126,6 +138,35 @@ export function FeedItem({
   const [streamUrl, setStreamUrl] = useState<string | null>(null)
   const [opening, setOpening] = useState(false)
   const isVideo = isVideoFile(name, mimeType)
+  const [originalAuthor, setOriginalAuthor] = useState<{
+    handle: string
+  } | null>(null)
+
+  useEffect(() => {
+    if (!sourceUri) {
+      setOriginalAuthor(null)
+      return
+    }
+    let sourceDid: string
+    try {
+      sourceDid = new AtUri(sourceUri).host
+    } catch {
+      setOriginalAuthor(null)
+      return
+    }
+    if (sourceDid === posterDid) {
+      setOriginalAuthor(null)
+      return
+    }
+    let cancelled = false
+    getProfileByDid(sourceDid).then((p) => {
+      if (cancelled) return
+      setOriginalAuthor(p ? { handle: p.handle } : null)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [sourceUri, posterDid])
 
   useEffect(() => {
     return () => {
@@ -244,6 +285,17 @@ export function FeedItem({
             · {formatRelative(createdAt)}
           </span>
         </div>
+        {originalAuthor && (
+          <p className="text-xs text-neutral-500 mt-0.5">
+            originally posted by{' '}
+            <a
+              href={`#/profile/${encodeURIComponent(originalAuthor.handle)}`}
+              className="hover:text-neutral-900 hover:underline"
+            >
+              @{originalAuthor.handle}
+            </a>
+          </p>
+        )}
         {streamUrl ? (
           <div className="mt-2 space-y-1">
             {/* biome-ignore lint/a11y/useMediaCaption: user-uploaded clip, no captions to attach */}

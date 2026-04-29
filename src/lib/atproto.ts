@@ -82,6 +82,55 @@ export function getPublicAgent(): AtpAgent {
   return publicAgent
 }
 
+/** Cached profile shape returned by {@link getProfileByDid}. */
+export type ProfileSummary = {
+  did: string
+  handle: string
+  displayName: string | null
+  avatar: string | null
+}
+
+const profileCache = new Map<string, ProfileSummary | null>()
+const inflightProfile = new Map<string, Promise<ProfileSummary | null>>()
+
+/**
+ * Look up a profile by DID via the public AppView, with in-memory caching.
+ * Returns `null` for unresolvable DIDs so the caller can short-circuit.
+ *
+ * Used to render "originally posted by @handle" attribution on repinned
+ * posts — typically called from many feed items at once, so we dedupe
+ * concurrent requests by DID.
+ */
+export async function getProfileByDid(
+  did: string,
+): Promise<ProfileSummary | null> {
+  if (profileCache.has(did)) return profileCache.get(did) ?? null
+  const existing = inflightProfile.get(did)
+  if (existing) return existing
+  const promise = (async () => {
+    try {
+      const res = await getPublicAgent().app.bsky.actor.getProfile({
+        actor: did,
+      })
+      const summary: ProfileSummary = {
+        did: res.data.did,
+        handle: res.data.handle,
+        displayName: res.data.displayName ?? null,
+        avatar: res.data.avatar ?? null,
+      }
+      profileCache.set(did, summary)
+      return summary
+    } catch {
+      profileCache.set(did, null)
+      return null
+    } finally {
+      inflightProfile.delete(did)
+    }
+  })()
+  inflightProfile.set(did, promise)
+  return promise
+}
+
 /**
  * Publish a `app.cumulus.share.post` record to the authenticated user's repo.
  * Returns the record's at:// URI + CID.
