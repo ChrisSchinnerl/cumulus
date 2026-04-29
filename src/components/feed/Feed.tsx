@@ -35,6 +35,20 @@ const MAX_FOLLOWS = 200
  */
 const FEED_FETCH_CONCURRENCY = 8
 
+/** localStorage key for the last-selected tab — restored across reloads. */
+const FEED_TAB_KEY = 'cumulus:feed-tab'
+
+/** Read the persisted tab; falls back to "following" on any error. */
+function loadPersistedTab(): FeedTab {
+  try {
+    const v = localStorage.getItem(FEED_TAB_KEY)
+    if (v === 'mine' || v === 'following') return v
+  } catch {
+    // localStorage disabled or quota exceeded — fall through to default.
+  }
+  return 'following'
+}
+
 /**
  * Build the list of authors to query for the given tab.
  *
@@ -128,7 +142,15 @@ export function Feed() {
   const agent = useAtprotoStore((s) => s.agent)
   const did = useAtprotoStore((s) => s.did)
   const sdk = useAuthStore((s) => s.sdk)
-  const [tab, setTab] = useState<FeedTab>('following')
+  const [tab, setTab] = useState<FeedTab>(loadPersistedTab)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(FEED_TAB_KEY, tab)
+    } catch {
+      // ignore — best-effort persistence
+    }
+  }, [tab])
   const [entries, setEntries] = useState<FeedEntry[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

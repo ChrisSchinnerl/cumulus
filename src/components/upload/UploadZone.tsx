@@ -1,22 +1,24 @@
-import {
-  encodedSize,
-  PinnedObject,
-  type ShardProgress,
-} from '@siafoundation/sia-storage'
+import { encodedSize, type ShardProgress } from '@siafoundation/sia-storage'
 import { useRef, useState } from 'react'
 import { writeSharePost } from '../../lib/atproto'
 import { APP_KEY, DATA_SHARDS, PARITY_SHARDS } from '../../lib/constants'
+import { expandDataTransferToFiles } from '../../lib/dropzone'
 import { generateImageThumbnail } from '../../lib/preview'
 import { useAtprotoStore } from '../../stores/atproto'
 import { useAuthStore } from '../../stores/auth'
 import { DevNote } from '../DevNote'
 
 type UploadProgress = {
-  fileName: string
-  fileSize: number
+  /** Display label — file name for single uploads, "N files" for batches. */
+  label: string
+  totalBytes: number
   shardsDone: number
   bytesUploaded: number
   encodedTotal: number
+  /** Number of files in the batch (≥1). */
+  fileCount: number
+  /** Pinning/record-write phase counter (0..fileCount). Set after slabs upload completes. */
+  finalizedCount: number
 }
 
 /** Format a byte count as a short human-readable string. */
@@ -36,16 +38,23 @@ const isPlaceholderKey = APP_KEY.startsWith('{' + '{')
  */
 const SHARE_VALID_UNTIL = new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000)
 
+/** Per-file pre-processing output: hash + optional preview. */
+type PreparedFile = {
+  file: File
+  hash: string
+  thumbnail: string | null
+}
+
 export type UploadZoneProps = {
-  /** Called after a successful upload + share-record write. Used to refresh the feed. */
+  /** Called after every successful per-file share-record write. Refreshes the feed incrementally. */
   onUploaded?: () => void
 }
 
 /**
- * Compose-only dropzone. Encrypts + uploads the file to Sia, then publishes
- * an `app.cumulus.share.post` record to the user's atproto repo so it
- * appears in followers' feeds. Owns no file list of its own — the {@link Feed}
- * component renders the user's own posts alongside their friends'.
+ * Compose-only dropzone. Accepts both individual files and dropped folders;
+ * recursively flattens folders, batches everything into a single packed Sia
+ * upload (which amortizes erasure-coding overhead across small files), then
+ * publishes one `app.cumulus.share.post` record per file.
  */
 export function UploadZone({ onUploaded }: UploadZoneProps) {
   const sdk = useAuthStore((s) => s.sdk)
@@ -56,72 +65,108 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  async function uploadFile(file: File) {
-    if (!sdk || !agent) return
-    setUploading(true)
-    setError(null)
-    const encodedTotal = encodedSize(file.size, DATA_SHARDS, PARITY_SHARDS)
-    setActiveUpload({
-      fileName: file.name,
-      fileSize: file.size,
-      shardsDone: 0,
-      bytesUploaded: 0,
-      encodedTotal,
-    })
-
-    try {
+  /**
+   * Read each file in turn, computing SHA-256 + (for images) a JPEG preview.
+   * Sequential rather than parallel to bound peak memory at one file at a time.
+   */
+  async function prepareFiles(files: File[]): Promise<PreparedFile[]> {
+    const prepared: PreparedFile[] = []
+    for (const file of files) {
       const hashBuffer = await crypto.subtle.digest(
         'SHA-256',
         await file.arrayBuffer(),
       )
       const hash = new Uint8Array(hashBuffer).toHex()
+      const thumbnail = await generateImageThumbnail(file).catch(() => null)
+      prepared.push({ file, hash, thumbnail })
+    }
+    return prepared
+  }
 
-      const object = new PinnedObject()
+  async function uploadFiles(files: File[]) {
+    if (!sdk || !agent || files.length === 0) return
+    setUploading(true)
+    setError(null)
+
+    const totalBytes = files.reduce((acc, f) => acc + f.size, 0)
+    // Aggregate encoded total — packing collapses per-file overhead, so this
+    // overestimates the bytes that hit hosts, but it's the right denominator
+    // for a deterministic 0..100% bar.
+    const encodedTotal = Number(
+      encodedSize(totalBytes, DATA_SHARDS, PARITY_SHARDS),
+    )
+    setActiveUpload({
+      label: files.length === 1 ? files[0].name : `${files.length} files`,
+      totalBytes,
+      shardsDone: 0,
+      bytesUploaded: 0,
+      encodedTotal,
+      fileCount: files.length,
+      finalizedCount: 0,
+    })
+
+    try {
+      const prepared = await prepareFiles(files)
+
       let shardsDone = 0
       let bytesUploaded = 0
-      const pinnedObject = await sdk.upload(object, file.stream(), {
+      const packed = sdk.uploadPacked({
         maxInflight: 10,
         dataShards: DATA_SHARDS,
         parityShards: PARITY_SHARDS,
         onShardUploaded: (progress: ShardProgress) => {
           shardsDone++
           bytesUploaded += progress.shardSize
-          setActiveUpload({
-            fileName: file.name,
-            fileSize: file.size,
-            shardsDone,
-            bytesUploaded,
-            encodedTotal,
-          })
+          setActiveUpload((prev) =>
+            prev ? { ...prev, shardsDone, bytesUploaded } : prev,
+          )
         },
       })
 
-      const metadata = {
-        name: file.name,
-        type: file.type || 'application/octet-stream',
-        size: file.size,
-        hash,
-        createdAt: Date.now(),
+      try {
+        for (const p of prepared) {
+          await packed.add(p.file.stream())
+        }
+        const objects = await packed.finalize()
+
+        for (let i = 0; i < objects.length; i++) {
+          const obj = objects[i]
+          const p = prepared[i]
+          const meta = {
+            name: p.file.name,
+            type: p.file.type || 'application/octet-stream',
+            size: p.file.size,
+            hash: p.hash,
+            createdAt: Date.now(),
+          }
+          obj.updateMetadata(new TextEncoder().encode(JSON.stringify(meta)))
+          await sdk.pinObject(obj)
+          await sdk.updateObjectMetadata(obj)
+
+          const shareUrl = sdk.shareObject(obj, SHARE_VALID_UNTIL)
+          await writeSharePost(agent, {
+            shareUrl,
+            siaKey: obj.id(),
+            name: meta.name,
+            mimeType: meta.type,
+            size: meta.size,
+            createdAt: new Date(meta.createdAt).toISOString(),
+            ...(p.thumbnail ? { thumbnail: p.thumbnail } : {}),
+          })
+
+          setActiveUpload((prev) =>
+            prev ? { ...prev, finalizedCount: i + 1 } : prev,
+          )
+          onUploaded?.()
+        }
+      } catch (e) {
+        try {
+          packed.cancel()
+        } catch {
+          // ignore — primary error is what we'll surface
+        }
+        throw e
       }
-
-      pinnedObject.updateMetadata(
-        new TextEncoder().encode(JSON.stringify(metadata)),
-      )
-      await sdk.pinObject(pinnedObject)
-      await sdk.updateObjectMetadata(pinnedObject)
-
-      const shareUrl = sdk.shareObject(pinnedObject, SHARE_VALID_UNTIL)
-      const thumbnail = await generateImageThumbnail(file).catch(() => null)
-      await writeSharePost(agent, {
-        shareUrl,
-        siaKey: pinnedObject.id(),
-        name: metadata.name,
-        mimeType: metadata.type,
-        size: metadata.size,
-        createdAt: new Date(metadata.createdAt).toISOString(),
-        ...(thumbnail ? { thumbnail } : {}),
-      })
-      onUploaded?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed')
     } finally {
@@ -130,18 +175,15 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
     }
   }
 
-  async function handleFiles(fileList: FileList) {
-    for (const file of Array.from(fileList)) {
-      await uploadFile(file)
-    }
-  }
-
-  function handleDrop(e: React.DragEvent) {
+  async function handleDrop(e: React.DragEvent) {
     e.preventDefault()
     setDragOver(false)
-    if (e.dataTransfer.files.length > 0) {
-      handleFiles(e.dataTransfer.files)
-    }
+    const files = await expandDataTransferToFiles(e.dataTransfer)
+    if (files.length > 0) await uploadFiles(files)
+  }
+
+  async function handlePicked(fileList: FileList) {
+    await uploadFiles(Array.from(fileList))
   }
 
   const uploadPercent = activeUpload
@@ -204,7 +246,7 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
           className="hidden"
           disabled={uploading}
           onChange={(e) => {
-            if (e.target.files) handleFiles(e.target.files)
+            if (e.target.files) handlePicked(e.target.files)
             e.target.value = ''
           }}
         />
@@ -213,9 +255,9 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
           <div className="space-y-3">
             <p className="text-neutral-700 text-sm">
               Uploading{' '}
-              <span className="text-neutral-900">{activeUpload.fileName}</span>{' '}
+              <span className="text-neutral-900">{activeUpload.label}</span>{' '}
               <span className="text-neutral-500">
-                ({formatBytes(activeUpload.fileSize)})
+                ({formatBytes(activeUpload.totalBytes)})
               </span>
             </p>
             <div className="w-full max-w-xs mx-auto bg-neutral-200 rounded-full h-1.5 overflow-hidden">
@@ -229,12 +271,14 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
               )}
             </div>
             <p className="text-neutral-500 text-xs font-mono">
-              {activeUpload.shardsDone} shards ·{' '}
-              {formatBytes(
-                (activeUpload.bytesUploaded / activeUpload.encodedTotal) *
-                  activeUpload.fileSize,
-              )}{' '}
-              / {formatBytes(activeUpload.fileSize)}
+              {activeUpload.shardsDone} shards
+              {activeUpload.fileCount > 1 && (
+                <>
+                  {' '}
+                  · {activeUpload.finalizedCount}/{activeUpload.fileCount}{' '}
+                  posted
+                </>
+              )}
             </p>
           </div>
         ) : (
@@ -251,10 +295,11 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
               <path d="M20 16v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2" />
             </svg>
             <p className="text-neutral-600 text-sm">
-              Drop a file to share with your followers
+              Drop files or a folder to share with your followers
             </p>
             <p className="text-neutral-500 text-xs">
-              Encrypted on Sia, indexed on atproto
+              Each file becomes a separate post · Stored on Sia, shared on
+              atproto
             </p>
           </div>
         )}
