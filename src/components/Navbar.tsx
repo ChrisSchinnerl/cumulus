@@ -41,7 +41,14 @@ export function Navbar() {
               />
             )}
             {handle && (
-              <span className="text-xs text-neutral-700">@{handle}</span>
+              <a
+                href={`https://bsky.app/profile/${handle}`}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-xs text-neutral-700 hover:text-neutral-900 hover:underline transition-colors"
+              >
+                @{handle}
+              </a>
             )}
             <button
               type="button"

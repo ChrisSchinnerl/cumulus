@@ -228,10 +228,18 @@ export function FeedItem({
       )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 text-sm">
-          <span className="font-medium text-neutral-900 truncate">
+          <a
+            href={`#/profile/${encodeURIComponent(handle)}`}
+            className="font-medium text-neutral-900 hover:underline truncate"
+          >
             {displayName || handle}
-          </span>
-          <span className="text-neutral-500 truncate">@{handle}</span>
+          </a>
+          <a
+            href={`#/profile/${encodeURIComponent(handle)}`}
+            className="text-neutral-500 hover:text-neutral-900 hover:underline truncate"
+          >
+            @{handle}
+          </a>
           <span className="text-neutral-400 text-xs shrink-0">
             · {formatRelative(createdAt)}
           </span>
@@ -337,7 +345,7 @@ export function FeedItem({
                 type="button"
                 onClick={handleSave}
                 disabled={downloading || saving || isSaved}
-                className="text-xs px-3 py-1.5 border border-neutral-300 rounded-lg hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-default transition-colors"
+                className="text-xs px-3 py-1.5 border border-green-200 text-green-700 rounded-lg hover:bg-green-50 disabled:opacity-40 disabled:cursor-default transition-colors"
               >
                 {saving ? 'Saving...' : isSaved ? 'Saved' : 'Save'}
               </button>
