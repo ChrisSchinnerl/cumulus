@@ -1,7 +1,7 @@
-import type { Agent } from '@atproto/api'
-import type { OAuthSession } from '@atproto/oauth-client-browser'
-import { create } from 'zustand'
-import { getOAuthClient, makeAgent, OAUTH_SCOPE } from '../lib/atproto'
+import type { Agent } from "@atproto/api";
+import type { OAuthSession } from "@atproto/oauth-client-browser";
+import { create } from "zustand";
+import { getOAuthClient, makeAgent, OAUTH_SCOPE } from "../lib/atproto";
 
 /**
  * In-memory atproto session state. Persistence lives inside the OAuth
@@ -9,42 +9,42 @@ import { getOAuthClient, makeAgent, OAUTH_SCOPE } from '../lib/atproto'
  * by calling {@link useAtprotoStore.getState().init}.
  */
 type AtprotoState = {
-  session: OAuthSession | null
-  agent: Agent | null
-  did: string | null
-  handle: string | null
-  displayName: string | null
-  avatar: string | null
-  initialized: boolean
-  error: string | null
+  session: OAuthSession | null;
+  agent: Agent | null;
+  did: string | null;
+  handle: string | null;
+  displayName: string | null;
+  avatar: string | null;
+  initialized: boolean;
+  error: string | null;
 
   /**
    * Restore an existing session or process an OAuth callback in the URL.
    * Idempotent — safe to call multiple times. Sets `initialized = true` once
    * complete so callers can wait on the initial hydration.
    */
-  init: () => Promise<void>
+  init: () => Promise<void>;
   /** Begin OAuth sign-in for the given handle/DID/PDS — redirects the page. */
-  signIn: (handle: string) => Promise<never>
+  signIn: (handle: string) => Promise<never>;
   /** Revoke the current session and clear in-memory state. */
-  signOut: () => Promise<void>
-}
+  signOut: () => Promise<void>;
+};
 
 /** Look up the user's profile (handle, displayName, avatar) by DID. */
 async function fetchProfile(
   agent: Agent,
   did: string,
 ): Promise<{
-  handle: string
-  displayName: string | null
-  avatar: string | null
+  handle: string;
+  displayName: string | null;
+  avatar: string | null;
 }> {
-  const res = await agent.app.bsky.actor.getProfile({ actor: did })
+  const res = await agent.app.bsky.actor.getProfile({ actor: did });
   return {
     handle: res.data.handle,
     displayName: res.data.displayName ?? null,
     avatar: res.data.avatar ?? null,
-  }
+  };
 }
 
 export const useAtprotoStore = create<AtprotoState>((set, get) => ({
@@ -58,14 +58,14 @@ export const useAtprotoStore = create<AtprotoState>((set, get) => ({
   error: null,
 
   init: async () => {
-    if (get().initialized) return
+    if (get().initialized) return;
     try {
-      const client = getOAuthClient()
-      const result = await client.init()
+      const client = await getOAuthClient();
+      const result = await client.init();
       if (result?.session) {
-        const agent = makeAgent(result.session)
-        const did = result.session.did
-        const profile = await fetchProfile(agent, did).catch(() => null)
+        const agent = makeAgent(result.session);
+        const did = result.session.did;
+        const profile = await fetchProfile(agent, did).catch(() => null);
         set({
           session: result.session,
           agent,
@@ -75,28 +75,28 @@ export const useAtprotoStore = create<AtprotoState>((set, get) => ({
           avatar: profile?.avatar ?? null,
           initialized: true,
           error: null,
-        })
+        });
       } else {
-        set({ initialized: true })
+        set({ initialized: true });
       }
     } catch (e) {
-      console.error('atproto init error:', e)
+      console.error("atproto init error:", e);
       set({
         initialized: true,
         error: e instanceof Error ? e.message : String(e),
-      })
+      });
     }
   },
 
   signIn: async (handle: string) => {
-    const client = getOAuthClient()
-    return client.signInRedirect(handle, { scope: OAUTH_SCOPE })
+    const client = await getOAuthClient();
+    return client.signInRedirect(handle, { scope: OAUTH_SCOPE });
   },
 
   signOut: async () => {
-    const session = get().session
+    const session = get().session;
     if (session) {
-      await session.signOut().catch(() => undefined)
+      await session.signOut().catch(() => undefined);
     }
     set({
       session: null,
@@ -106,6 +106,6 @@ export const useAtprotoStore = create<AtprotoState>((set, get) => ({
       displayName: null,
       avatar: null,
       error: null,
-    })
+    });
   },
-}))
+}));

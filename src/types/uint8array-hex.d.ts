@@ -2,9 +2,9 @@
 // Drop this file once `lib.es*.d.ts` ships them.
 
 interface Uint8Array {
-  toHex(): string
+  toHex(): string;
 }
 
 interface Uint8ArrayConstructor {
-  fromHex(hex: string): Uint8Array
+  fromHex(hex: string): Uint8Array;
 }

@@ -1,24 +1,24 @@
-import { APP_NAME } from '../lib/constants'
-import { useAtprotoStore } from '../stores/atproto'
-import { useAuthStore } from '../stores/auth'
+import { APP_NAME } from "../lib/constants";
+import { useAtprotoStore } from "../stores/atproto";
+import { useAuthStore } from "../stores/auth";
 
 /**
  * Top app bar. Shows the Bluesky handle/avatar (when fully connected) and a
  * single sign-out button that clears both the Sia and atproto sessions.
  */
 export function Navbar() {
-  const siaStep = useAuthStore((s) => s.step)
-  const resetSia = useAuthStore((s) => s.reset)
-  const handle = useAtprotoStore((s) => s.handle)
-  const avatar = useAtprotoStore((s) => s.avatar)
-  const session = useAtprotoStore((s) => s.session)
-  const atprotoSignOut = useAtprotoStore((s) => s.signOut)
-  const isConnected = siaStep === 'connected' && session !== null
+  const siaStep = useAuthStore((s) => s.step);
+  const resetSia = useAuthStore((s) => s.reset);
+  const handle = useAtprotoStore((s) => s.handle);
+  const avatar = useAtprotoStore((s) => s.avatar);
+  const session = useAtprotoStore((s) => s.session);
+  const atprotoSignOut = useAtprotoStore((s) => s.signOut);
+  const isConnected = siaStep === "connected" && session !== null;
 
   async function handleSignOut() {
-    await atprotoSignOut()
-    resetSia()
-    window.location.reload()
+    await atprotoSignOut();
+    resetSia();
+    window.location.reload();
   }
 
   return (
@@ -61,5 +61,5 @@ export function Navbar() {
         )}
       </div>
     </header>
-  )
+  );
 }

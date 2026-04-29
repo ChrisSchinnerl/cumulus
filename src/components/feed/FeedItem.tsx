@@ -1,24 +1,24 @@
-import { AtUri } from '@atproto/api'
-import { useEffect, useState } from 'react'
-import { getProfileByDid } from '../../lib/atproto'
-import { registerStream, unregisterStream } from '../../lib/streaming'
-import { useAuthStore } from '../../stores/auth'
+import { AtUri } from "@atproto/api";
+import { useEffect, useState } from "react";
+import { getProfileByDid } from "../../lib/atproto";
+import { registerStream, unregisterStream } from "../../lib/streaming";
+import { useAuthStore } from "../../stores/auth";
 
 /** File extensions we treat as video when the stored MIME type is missing or generic. */
 const VIDEO_EXTENSIONS = [
-  '.mp4',
-  '.mov',
-  '.webm',
-  '.mkv',
-  '.m4v',
-  '.avi',
-  '.mpg',
-  '.mpeg',
-  '.ogv',
-  '.wmv',
-  '.flv',
-  '.3gp',
-]
+  ".mp4",
+  ".mov",
+  ".webm",
+  ".mkv",
+  ".m4v",
+  ".avi",
+  ".mpg",
+  ".mpeg",
+  ".ogv",
+  ".wmv",
+  ".flv",
+  ".3gp",
+];
 
 /**
  * True if the file is a video, based on MIME type or filename extension.
@@ -27,82 +27,82 @@ const VIDEO_EXTENSIONS = [
  * the video affordance.
  */
 function isVideoFile(name: string, mimeType: string): boolean {
-  if (mimeType.startsWith('video/')) return true
-  const lower = name.toLowerCase()
-  return VIDEO_EXTENSIONS.some((ext) => lower.endsWith(ext))
+  if (mimeType.startsWith("video/")) return true;
+  const lower = name.toLowerCase();
+  return VIDEO_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
 /** Format a byte count as a short human-readable string (e.g. "1.2 MB"). */
 function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`;
 }
 
 /** Format an ISO date as a short relative-ish string (e.g. "2h ago", "3d ago"). */
 function formatRelative(iso: string): string {
-  const then = new Date(iso).getTime()
-  if (!Number.isFinite(then)) return ''
-  const ms = Date.now() - then
-  const sec = Math.round(ms / 1000)
-  if (sec < 60) return `${sec}s ago`
-  const min = Math.round(sec / 60)
-  if (min < 60) return `${min}m ago`
-  const hr = Math.round(min / 60)
-  if (hr < 24) return `${hr}h ago`
-  const days = Math.round(hr / 24)
-  return `${days}d ago`
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "";
+  const ms = Date.now() - then;
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const days = Math.round(hr / 24);
+  return `${days}d ago`;
 }
 
 export type FeedItemProps = {
   /** The author's handle (e.g. `alice.bsky.social`) — shown in the byline. */
-  handle: string
+  handle: string;
   /** Optional display name; falls back to handle when absent. */
-  displayName?: string | null
+  displayName?: string | null;
   /** Optional avatar URL fetched from the bsky AppView. */
-  avatar?: string | null
+  avatar?: string | null;
   /** Original file name for download. */
-  name: string
-  mimeType: string
-  size: number
+  name: string;
+  mimeType: string;
+  size: number;
   /** ISO datetime when the share was published. */
-  createdAt: string
+  createdAt: string;
   /** Sia share URL — opaque pointer fed into `sdk.sharedObject(...)`. */
-  shareUrl: string
+  shareUrl: string;
   /** DID of the user whose repo this post lives in (the poster). */
-  posterDid: string
+  posterDid: string;
   /**
    * `at://` URI of the original post this is a save of, if any. When the
    * URI's DID differs from {@link posterDid}, the byline shows an
    * "originally posted by @handle" attribution line.
    */
-  sourceUri?: string
+  sourceUri?: string;
   /**
    * Optional inline preview (JPEG `data:` URL). Rendered above the metadata
    * row when present — typically only for image uploads.
    */
-  thumbnail?: string | null
+  thumbnail?: string | null;
   /**
    * Optional delete callback. When provided, a Delete button is rendered
    * alongside Download. The parent owns the actual deletion (atproto record
    * + Sia object) and is expected to remove this item from its list.
    */
-  onDelete?: () => Promise<void>
+  onDelete?: () => Promise<void>;
   /**
    * Optional repin callback. When provided AND `isSaved` is false, a Save
    * button is rendered. The parent pins the underlying Sia object to the
    * viewer's indexer and writes a copy of the record to their repo.
    */
-  onSave?: () => Promise<void>
+  onSave?: () => Promise<void>;
   /**
    * Whether the viewer's repo already contains a record for this same
    * underlying Sia object. When true, the button reads "Saved" and is
    * disabled — useful only when `onSave` would otherwise be active.
    */
-  isSaved?: boolean
-}
+  isSaved?: boolean;
+};
 
 /**
  * A single share entry in the feed. Renders author + file metadata, and
@@ -125,134 +125,134 @@ export function FeedItem({
   onSave,
   isSaved = false,
 }: FeedItemProps) {
-  const sdk = useAuthStore((s) => s.sdk)
-  const [downloading, setDownloading] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const sdk = useAuthStore((s) => s.sdk);
+  const [downloading, setDownloading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState<{
-    done: number
-    total: number
-  } | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [streamId, setStreamId] = useState<string | null>(null)
-  const [streamUrl, setStreamUrl] = useState<string | null>(null)
-  const [opening, setOpening] = useState(false)
-  const isVideo = isVideoFile(name, mimeType)
+    done: number;
+    total: number;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [streamId, setStreamId] = useState<string | null>(null);
+  const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
+  const isVideo = isVideoFile(name, mimeType);
   const [originalAuthor, setOriginalAuthor] = useState<{
-    handle: string
-  } | null>(null)
+    handle: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!sourceUri) {
-      setOriginalAuthor(null)
-      return
+      setOriginalAuthor(null);
+      return;
     }
-    let sourceDid: string
+    let sourceDid: string;
     try {
-      sourceDid = new AtUri(sourceUri).host
+      sourceDid = new AtUri(sourceUri).host;
     } catch {
-      setOriginalAuthor(null)
-      return
+      setOriginalAuthor(null);
+      return;
     }
     if (sourceDid === posterDid) {
-      setOriginalAuthor(null)
-      return
+      setOriginalAuthor(null);
+      return;
     }
-    let cancelled = false
+    let cancelled = false;
     getProfileByDid(sourceDid).then((p) => {
-      if (cancelled) return
-      setOriginalAuthor(p ? { handle: p.handle } : null)
-    })
+      if (cancelled) return;
+      setOriginalAuthor(p ? { handle: p.handle } : null);
+    });
     return () => {
-      cancelled = true
-    }
-  }, [sourceUri, posterDid])
+      cancelled = true;
+    };
+  }, [sourceUri, posterDid]);
 
   useEffect(() => {
     return () => {
-      if (streamId) unregisterStream(streamId)
-    }
-  }, [streamId])
+      if (streamId) unregisterStream(streamId);
+    };
+  }, [streamId]);
 
   async function handlePlay() {
-    if (opening || streamUrl) return
-    setOpening(true)
-    setError(null)
+    if (opening || streamUrl) return;
+    setOpening(true);
+    setError(null);
     try {
-      const reg = await registerStream(shareUrl, mimeType)
-      setStreamId(reg.streamId)
-      setStreamUrl(reg.streamUrl)
+      const reg = await registerStream(shareUrl, mimeType);
+      setStreamId(reg.streamId);
+      setStreamUrl(reg.streamUrl);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Stream failed')
+      setError(e instanceof Error ? e.message : "Stream failed");
     } finally {
-      setOpening(false)
+      setOpening(false);
     }
   }
 
   function handleStop() {
-    if (streamId) unregisterStream(streamId)
-    setStreamId(null)
-    setStreamUrl(null)
+    if (streamId) unregisterStream(streamId);
+    setStreamId(null);
+    setStreamUrl(null);
   }
 
   async function handleDownload() {
-    if (!sdk) return
-    setDownloading(true)
-    setError(null)
-    setProgress({ done: 0, total: size })
+    if (!sdk) return;
+    setDownloading(true);
+    setError(null);
+    setProgress({ done: 0, total: size });
     try {
-      const object = await sdk.sharedObject(shareUrl)
-      const stream = sdk.download(object, { maxInflight: 10 })
-      const reader = stream.getReader()
-      const chunks: Uint8Array[] = []
-      let done = 0
+      const object = await sdk.sharedObject(shareUrl);
+      const stream = sdk.download(object, { maxInflight: 10 });
+      const reader = stream.getReader();
+      const chunks: Uint8Array[] = [];
+      let done = 0;
       while (true) {
-        const { done: finished, value } = await reader.read()
-        if (finished) break
-        chunks.push(value)
-        done += value.length
-        setProgress({ done, total: size })
+        const { done: finished, value } = await reader.read();
+        if (finished) break;
+        chunks.push(value);
+        done += value.length;
+        setProgress({ done, total: size });
       }
-      const blob = new Blob(chunks as BlobPart[], { type: mimeType })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = name
-      a.click()
-      URL.revokeObjectURL(url)
+      const blob = new Blob(chunks as BlobPart[], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Download failed')
+      setError(e instanceof Error ? e.message : "Download failed");
     } finally {
-      setDownloading(false)
-      setProgress(null)
+      setDownloading(false);
+      setProgress(null);
     }
   }
 
   async function handleDelete() {
-    if (!onDelete || deleting) return
-    if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return
-    setDeleting(true)
-    setError(null)
+    if (!onDelete || deleting) return;
+    if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    setDeleting(true);
+    setError(null);
     try {
-      await onDelete()
+      await onDelete();
     } catch (e) {
-      setDeleting(false)
-      setError(e instanceof Error ? e.message : 'Delete failed')
+      setDeleting(false);
+      setError(e instanceof Error ? e.message : "Delete failed");
     }
     // On success, the parent removes this row from its list, so we don't
     // bother resetting `deleting` — the component unmounts.
   }
 
   async function handleSave() {
-    if (!onSave || saving || isSaved) return
-    setSaving(true)
-    setError(null)
+    if (!onSave || saving || isSaved) return;
+    setSaving(true);
+    setError(null);
     try {
-      await onSave()
+      await onSave();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed')
+      setError(e instanceof Error ? e.message : "Save failed");
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
   }
 
@@ -287,7 +287,7 @@ export function FeedItem({
         </div>
         {originalAuthor && (
           <p className="text-xs text-neutral-500 mt-0.5">
-            originally posted by{' '}
+            originally posted by{" "}
             <a
               href={`#/profile/${encodeURIComponent(originalAuthor.handle)}`}
               className="hover:text-neutral-900 hover:underline"
@@ -372,12 +372,12 @@ export function FeedItem({
             <p className="text-sm text-neutral-900 truncate">{name}</p>
             <p className="text-xs text-neutral-500 mt-0.5">
               {formatBytes(size)}
-              {mimeType !== 'application/octet-stream' && (
+              {mimeType !== "application/octet-stream" && (
                 <span> · {mimeType}</span>
               )}
               {progress && (
                 <span>
-                  {' '}
+                  {" "}
                   · {formatBytes(progress.done)} / {formatBytes(progress.total)}
                 </span>
               )}
@@ -390,7 +390,7 @@ export function FeedItem({
               disabled={downloading || deleting || saving}
               className="text-xs px-3 py-1.5 border border-neutral-300 rounded-lg hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-default transition-colors"
             >
-              {downloading ? 'Downloading...' : 'Download'}
+              {downloading ? "Downloading..." : "Download"}
             </button>
             {onSave && (
               <button
@@ -399,7 +399,7 @@ export function FeedItem({
                 disabled={downloading || saving || isSaved}
                 className="text-xs px-3 py-1.5 border border-green-200 text-green-700 rounded-lg hover:bg-green-50 disabled:opacity-40 disabled:cursor-default transition-colors"
               >
-                {saving ? 'Saving...' : isSaved ? 'Saved' : 'Save'}
+                {saving ? "Saving..." : isSaved ? "Saved" : "Save"}
               </button>
             )}
             {onDelete && (
@@ -409,7 +409,7 @@ export function FeedItem({
                 disabled={downloading || deleting || saving}
                 className="text-xs px-3 py-1.5 border border-red-200 text-red-700 rounded-lg hover:bg-red-50 disabled:opacity-40 disabled:cursor-default transition-colors"
               >
-                {deleting ? 'Deleting...' : 'Delete'}
+                {deleting ? "Deleting..." : "Delete"}
               </button>
             )}
           </div>
@@ -421,5 +421,5 @@ export function FeedItem({
         )}
       </div>
     </div>
-  )
+  );
 }

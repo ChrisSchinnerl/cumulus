@@ -1,55 +1,55 @@
-import { AppKey, Builder, initSia } from '@siafoundation/sia-storage'
-import { useEffect, useRef } from 'react'
-import { APP_META } from '../../lib/constants'
-import { useAuthStore } from '../../stores/auth'
-import { ApproveScreen } from './ApproveScreen'
-import { ConnectScreen } from './ConnectScreen'
-import { LoadingScreen } from './LoadingScreen'
-import { RecoveryScreen } from './RecoveryScreen'
+import { AppKey, Builder, initSia } from "@siafoundation/sia-storage";
+import { useEffect, useRef } from "react";
+import { APP_META } from "../../lib/constants";
+import { useAuthStore } from "../../stores/auth";
+import { ApproveScreen } from "./ApproveScreen";
+import { ConnectScreen } from "./ConnectScreen";
+import { LoadingScreen } from "./LoadingScreen";
+import { RecoveryScreen } from "./RecoveryScreen";
 
 export function AuthFlow() {
-  const step = useAuthStore((s) => s.step)
-  const error = useAuthStore((s) => s.error)
-  const setError = useAuthStore((s) => s.setError)
-  const builderRef = useRef<Builder | null>(null)
+  const step = useAuthStore((s) => s.step);
+  const error = useAuthStore((s) => s.error);
+  const setError = useAuthStore((s) => s.setError);
+  const builderRef = useRef<Builder | null>(null);
 
   useEffect(() => {
-    let cancelled = false
+    let cancelled = false;
 
     async function init() {
       const { storedKeyHex, indexerUrl, setSdk, setStep } =
-        useAuthStore.getState()
+        useAuthStore.getState();
       try {
-        await initSia()
+        await initSia();
 
         if (storedKeyHex && indexerUrl) {
-          const appKey = new AppKey(Uint8Array.fromHex(storedKeyHex))
-          const builder = new Builder(indexerUrl, APP_META)
-          const sdk = await builder.connected(appKey)
+          const appKey = new AppKey(Uint8Array.fromHex(storedKeyHex));
+          const builder = new Builder(indexerUrl, APP_META);
+          const sdk = await builder.connected(appKey);
 
-          if (cancelled) return
+          if (cancelled) return;
           if (sdk) {
-            setSdk(sdk)
-            return
+            setSdk(sdk);
+            return;
           }
         }
 
         if (!cancelled) {
-          setStep('connect')
+          setStep("connect");
         }
       } catch (e) {
         if (!cancelled) {
-          console.error('Init error:', e)
-          setStep('connect')
+          console.error("Init error:", e);
+          setStep("connect");
         }
       }
     }
 
-    init()
+    init();
     return () => {
-      cancelled = true
-    }
-  }, [])
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="flex-1 flex flex-col">
@@ -66,10 +66,10 @@ export function AuthFlow() {
         </div>
       )}
 
-      {step === 'loading' && <LoadingScreen />}
-      {step === 'connect' && <ConnectScreen builder={builderRef} />}
-      {step === 'approve' && <ApproveScreen builder={builderRef} />}
-      {step === 'recovery' && <RecoveryScreen builder={builderRef} />}
+      {step === "loading" && <LoadingScreen />}
+      {step === "connect" && <ConnectScreen builder={builderRef} />}
+      {step === "approve" && <ApproveScreen builder={builderRef} />}
+      {step === "recovery" && <RecoveryScreen builder={builderRef} />}
     </div>
-  )
+  );
 }

@@ -1,11 +1,11 @@
-import type { ReactNode } from 'react'
+import type { ReactNode } from "react";
 
 export function DevNote({
   title,
   children,
 }: {
-  title: string
-  children: ReactNode
+  title: string;
+  children: ReactNode;
 }) {
   return (
     <div className="border-l-4 border-amber-500 bg-amber-50 rounded-r-lg p-4 space-y-1">
@@ -17,5 +17,5 @@ export function DevNote({
         {children}
       </div>
     </div>
-  )
+  );
 }

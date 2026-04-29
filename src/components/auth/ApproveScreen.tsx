@@ -1,61 +1,61 @@
-import type { Builder } from '@siafoundation/sia-storage'
-import { useEffect, useRef, useState } from 'react'
-import { useAuthStore } from '../../stores/auth'
-import { CopyButton } from '../CopyButton'
-import { DevNote } from '../DevNote'
+import type { Builder } from "@siafoundation/sia-storage";
+import { useEffect, useRef, useState } from "react";
+import { useAuthStore } from "../../stores/auth";
+import { CopyButton } from "../CopyButton";
+import { DevNote } from "../DevNote";
 
 export function ApproveScreen({
   builder,
 }: {
-  builder: React.RefObject<Builder | null>
+  builder: React.RefObject<Builder | null>;
 }) {
-  const { approvalUrl, setStep, setError } = useAuthStore()
-  const [polling, setPolling] = useState(true)
-  const [pollError, setPollError] = useState(false)
-  const [manualChecking, setManualChecking] = useState(false)
-  const pollStarted = useRef(false)
+  const { approvalUrl, setStep, setError } = useAuthStore();
+  const [polling, setPolling] = useState(true);
+  const [pollError, setPollError] = useState(false);
+  const [manualChecking, setManualChecking] = useState(false);
+  const pollStarted = useRef(false);
 
   useEffect(() => {
     // Guard against React strict mode double-mount — waitForApproval()
     // consumes the builder's state and cannot be called twice.
-    if (pollStarted.current) return
-    pollStarted.current = true
+    if (pollStarted.current) return;
+    pollStarted.current = true;
 
     async function poll() {
-      const b = builder.current
-      if (!b) return
+      const b = builder.current;
+      if (!b) return;
 
       try {
-        await b.waitForApproval()
-        setStep('recovery')
+        await b.waitForApproval();
+        setStep("recovery");
       } catch {
-        setPolling(false)
-        setPollError(true)
+        setPolling(false);
+        setPollError(true);
       }
     }
 
-    poll()
-  }, [builder, setStep])
+    poll();
+  }, [builder, setStep]);
 
   async function handleManualCheck() {
-    const b = builder.current
+    const b = builder.current;
     if (!b) {
-      setError('No builder instance')
-      return
+      setError("No builder instance");
+      return;
     }
 
-    setManualChecking(true)
-    setPollError(false)
-    setPolling(true)
+    setManualChecking(true);
+    setPollError(false);
+    setPolling(true);
     try {
-      await b.waitForApproval()
-      setStep('recovery')
+      await b.waitForApproval();
+      setStep("recovery");
     } catch (e) {
-      setPolling(false)
-      setPollError(true)
-      setError(e instanceof Error ? e.message : 'Approval check failed')
+      setPolling(false);
+      setPollError(true);
+      setError(e instanceof Error ? e.message : "Approval check failed");
     } finally {
-      setManualChecking(false)
+      setManualChecking(false);
     }
   }
 
@@ -75,7 +75,7 @@ export function ApproveScreen({
           <p>
             The user must visit the approval URL in another tab (or on the
             indexer&apos;s dashboard) to authorize your app. This is an
-            out-of-band step — your app polls for approval via{' '}
+            out-of-band step — your app polls for approval via{" "}
             <code className="text-amber-700">builder.waitForApproval()</code>.
             Once approved, the flow continues to recovery phrase setup.
           </p>
@@ -112,7 +112,7 @@ export function ApproveScreen({
               Checking...
             </span>
           ) : (
-            'Check Approval'
+            "Check Approval"
           )}
         </button>
 
@@ -131,5 +131,5 @@ export function ApproveScreen({
         </div>
       </div>
     </div>
-  )
+  );
 }

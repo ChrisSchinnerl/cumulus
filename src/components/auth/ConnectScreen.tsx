@@ -1,43 +1,43 @@
-import { Builder } from '@siafoundation/sia-storage'
-import { useState } from 'react'
-import { APP_META, DEFAULT_INDEXER_URL } from '../../lib/constants'
-import { useAuthStore } from '../../stores/auth'
-import { DevNote } from '../DevNote'
+import { Builder } from "@siafoundation/sia-storage";
+import { useState } from "react";
+import { APP_META, DEFAULT_INDEXER_URL } from "../../lib/constants";
+import { useAuthStore } from "../../stores/auth";
+import { DevNote } from "../DevNote";
 
 export function ConnectScreen({
   builder,
 }: {
-  builder: React.RefObject<Builder | null>
+  builder: React.RefObject<Builder | null>;
 }) {
   const { indexerUrl, setIndexerUrl, setStep, setError, setApprovalUrl } =
-    useAuthStore()
-  const [url, setUrl] = useState(indexerUrl || DEFAULT_INDEXER_URL)
-  const [loading, setLoading] = useState(false)
+    useAuthStore();
+  const [url, setUrl] = useState(indexerUrl || DEFAULT_INDEXER_URL);
+  const [loading, setLoading] = useState(false);
 
   async function handleConnect() {
-    setLoading(true)
-    setError(null)
+    setLoading(true);
+    setError(null);
     try {
-      const b = new Builder(url, APP_META)
-      builder.current = b
-      setIndexerUrl(url)
+      const b = new Builder(url, APP_META);
+      builder.current = b;
+      setIndexerUrl(url);
 
       try {
-        await b.requestConnection()
-        const approvalUrl = b.responseUrl()
-        setApprovalUrl(approvalUrl)
-        setStep('approve')
+        await b.requestConnection();
+        const approvalUrl = b.responseUrl();
+        setApprovalUrl(approvalUrl);
+        setStep("approve");
       } catch (e) {
         setError(
           e instanceof Error
             ? `Connection failed: ${e.message}. Check the indexer URL and that it allows requests from this origin (CORS).`
-            : 'Connection failed. Check the indexer URL and CORS configuration.',
-        )
+            : "Connection failed. Check the indexer URL and CORS configuration.",
+        );
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to connect')
+      setError(e instanceof Error ? e.message : "Failed to connect");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
@@ -55,9 +55,9 @@ export function ConnectScreen({
 
         <DevNote title="Indexer URL & App Key">
           <p>
-            The indexer URL points to your Sia storage provider. The default is{' '}
+            The indexer URL points to your Sia storage provider. The default is{" "}
             <code className="text-amber-700">https://sia.storage</code>. Your
-            app key (set in{' '}
+            app key (set in{" "}
             <code className="text-amber-700">src/lib/constants.ts</code>)
             uniquely identifies your app to the indexer.
           </p>
@@ -82,10 +82,10 @@ export function ConnectScreen({
             disabled={loading || !url}
             className="w-full py-3 bg-green-600 hover:bg-green-700 disabled:bg-neutral-200 disabled:text-neutral-400 text-white font-medium rounded-lg transition-colors"
           >
-            {loading ? 'Connecting...' : 'Connect'}
+            {loading ? "Connecting..." : "Connect"}
           </button>
         </div>
       </div>
     </div>
-  )
+  );
 }

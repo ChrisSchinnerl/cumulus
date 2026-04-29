@@ -2,7 +2,7 @@
  * NSID for cumulus share post records — used as the `collection` parameter
  * when reading/writing records via `com.atproto.repo.*` XRPC methods.
  */
-export const NSID_SHARE_POST = 'app.cumulus.share.post'
+export const NSID_SHARE_POST = "app.cumulus.share.post";
 
 /**
  * The shape of a single share record stored in the user's atproto repo.
@@ -11,13 +11,13 @@ export const NSID_SHARE_POST = 'app.cumulus.share.post'
  * encryption lives in the Sia layer.
  */
 export type SharePost = {
-  $type: typeof NSID_SHARE_POST
-  shareUrl: string
-  name: string
-  mimeType: string
-  size: number
+  $type: typeof NSID_SHARE_POST;
+  shareUrl: string;
+  name: string;
+  mimeType: string;
+  size: number;
   /** ISO-8601 datetime; used as the feed sort key. */
-  createdAt: string
+  createdAt: string;
   /**
    * Indexer object key (`PinnedObject.id()`). Required on the author's own
    * indexer to call `sdk.deleteObject(...)`; surfacing it in the public
@@ -25,45 +25,45 @@ export type SharePost = {
    * Optional for backwards compatibility with records written before this
    * field existed — old records fall back to `sharedObject(url).id()`.
    */
-  siaKey?: string
+  siaKey?: string;
   /**
    * Optional inline preview as a `data:image/jpeg;base64,...` URL. Generated
    * client-side at upload time for image MIME types. Capped at a few KB so
    * the atproto record stays small.
    */
-  thumbnail?: string
+  thumbnail?: string;
   /**
    * `at://` URI of the original record this post was repinned from. Set when
    * a user clicks "Save" on someone else's share; absent on original uploads.
    * Used internally to render the Save → Saved state in the Following feed —
    * not displayed in the UI.
    */
-  sourceUri?: string
-}
+  sourceUri?: string;
+};
 
 /** A `SharePost` paired with its repo URI + CID (as returned by listRecords). */
 export type SharePostRecord = {
-  uri: string
-  cid: string
-  value: SharePost
-}
+  uri: string;
+  cid: string;
+  value: SharePost;
+};
 
 /**
  * Runtime guard for {@link SharePost}. Use when reading records from arbitrary
  * repos — values are untrusted JSON until validated.
  */
 export function isSharePost(value: unknown): value is SharePost {
-  if (!value || typeof value !== 'object') return false
-  const v = value as Record<string, unknown>
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
   return (
     v.$type === NSID_SHARE_POST &&
-    typeof v.shareUrl === 'string' &&
-    typeof v.name === 'string' &&
-    typeof v.mimeType === 'string' &&
-    typeof v.size === 'number' &&
-    typeof v.createdAt === 'string' &&
-    (v.siaKey === undefined || typeof v.siaKey === 'string') &&
-    (v.thumbnail === undefined || typeof v.thumbnail === 'string') &&
-    (v.sourceUri === undefined || typeof v.sourceUri === 'string')
-  )
+    typeof v.shareUrl === "string" &&
+    typeof v.name === "string" &&
+    typeof v.mimeType === "string" &&
+    typeof v.size === "number" &&
+    typeof v.createdAt === "string" &&
+    (v.siaKey === undefined || typeof v.siaKey === "string") &&
+    (v.thumbnail === undefined || typeof v.thumbnail === "string") &&
+    (v.sourceUri === undefined || typeof v.sourceUri === "string")
+  );
 }

@@ -1,58 +1,58 @@
-import { AtUri } from '@atproto/api'
-import { useCallback, useEffect, useState } from 'react'
+import { AtUri } from "@atproto/api";
+import { useCallback, useEffect, useState } from "react";
 import {
   deleteSharePost,
   getPublicAgent,
   listSharePosts,
   SHARE_VALID_UNTIL,
   writeSharePost,
-} from '../../lib/atproto'
-import type { SharePost } from '../../lib/lexicons'
-import { useAtprotoStore } from '../../stores/atproto'
-import { useAuthStore } from '../../stores/auth'
-import { FeedItem } from './FeedItem'
+} from "../../lib/atproto";
+import type { SharePost } from "../../lib/lexicons";
+import { useAtprotoStore } from "../../stores/atproto";
+import { useAuthStore } from "../../stores/auth";
+import { FeedItem } from "./FeedItem";
 
 type Author = {
-  did: string
-  handle: string
-  displayName: string | null
-  avatar: string | null
-}
+  did: string;
+  handle: string;
+  displayName: string | null;
+  avatar: string | null;
+};
 
 type FeedEntry = {
-  uri: string
-  author: Author
-  post: SharePost
-}
+  uri: string;
+  author: Author;
+  post: SharePost;
+};
 
 /** Which slice of share posts to render. */
-export type FeedTab = 'following' | 'mine'
+export type FeedTab = "following" | "mine";
 
 /**
  * Maximum number of follows we page through when building the "Following"
  * feed. Prevents unbounded fanout for users with very large follow graphs.
  */
-const MAX_FOLLOWS = 200
+const MAX_FOLLOWS = 200;
 
 /**
  * Max in-flight `listRecords` calls when loading the feed. Each call hits a
  * different PDS, but plc.directory rate-limits and the Bluesky-hosted PDSes
  * also push back if you fan out hundreds of requests at once.
  */
-const FEED_FETCH_CONCURRENCY = 8
+const FEED_FETCH_CONCURRENCY = 8;
 
 /** localStorage key for the last-selected tab — restored across reloads. */
-const FEED_TAB_KEY = 'cumulus:feed-tab'
+const FEED_TAB_KEY = "cumulus:feed-tab";
 
 /** Read the persisted tab; falls back to "following" on any error. */
 function loadPersistedTab(): FeedTab {
   try {
-    const v = localStorage.getItem(FEED_TAB_KEY)
-    if (v === 'mine' || v === 'following') return v
+    const v = localStorage.getItem(FEED_TAB_KEY);
+    if (v === "mine" || v === "following") return v;
   } catch {
     // localStorage disabled or quota exceeded — fall through to default.
   }
-  return 'following'
+  return "following";
 }
 
 /**
@@ -65,38 +65,38 @@ function loadPersistedTab(): FeedTab {
  * by the user's own PDS through OAuth tokens.
  */
 async function loadAuthors(viewerDid: string, tab: FeedTab): Promise<Author[]> {
-  const pub = getPublicAgent()
+  const pub = getPublicAgent();
   const viewerProfile = await pub.app.bsky.actor.getProfile({
     actor: viewerDid,
-  })
+  });
   const self: Author = {
     did: viewerDid,
     handle: viewerProfile.data.handle,
     displayName: viewerProfile.data.displayName ?? null,
     avatar: viewerProfile.data.avatar ?? null,
-  }
-  if (tab === 'mine') return [self]
+  };
+  if (tab === "mine") return [self];
 
-  const follows: Author[] = []
-  let cursor: string | undefined
+  const follows: Author[] = [];
+  let cursor: string | undefined;
   while (follows.length < MAX_FOLLOWS) {
     const res = await pub.app.bsky.graph.getFollows({
       actor: viewerDid,
       limit: 100,
       cursor,
-    })
+    });
     for (const f of res.data.follows) {
       follows.push({
         did: f.did,
         handle: f.handle,
         displayName: f.displayName ?? null,
         avatar: f.avatar ?? null,
-      })
+      });
     }
-    if (!res.data.cursor || res.data.follows.length === 0) break
-    cursor = res.data.cursor
+    if (!res.data.cursor || res.data.follows.length === 0) break;
+    cursor = res.data.cursor;
   }
-  return follows
+  return follows;
 }
 
 /**
@@ -110,23 +110,23 @@ async function pMap<T, R>(
   fn: (item: T) => Promise<R>,
   onItem: (result: R, item: T) => void,
 ): Promise<void> {
-  let cursor = 0
+  let cursor = 0;
   async function worker(): Promise<void> {
     while (true) {
-      const idx = cursor++
-      if (idx >= items.length) return
-      const item = items[idx]
+      const idx = cursor++;
+      if (idx >= items.length) return;
+      const item = items[idx];
       try {
-        const r = await fn(item)
-        onItem(r, item)
+        const r = await fn(item);
+        onItem(r, item);
       } catch (e) {
-        console.warn('feed: author load failed', item, e)
+        console.warn("feed: author load failed", item, e);
       }
     }
   }
   await Promise.all(
     Array.from({ length: Math.min(limit, items.length) }, worker),
-  )
+  );
 }
 
 /**
@@ -146,13 +146,13 @@ function isAlreadyMine(
   savedSourceUris: Set<string>,
   myDid: string | null,
 ): boolean {
-  const source = entry.post.sourceUri ?? entry.uri
-  if (savedSourceUris.has(source)) return true
-  if (!myDid) return false
+  const source = entry.post.sourceUri ?? entry.uri;
+  if (savedSourceUris.has(source)) return true;
+  if (!myDid) return false;
   try {
-    return new AtUri(source).host === myDid
+    return new AtUri(source).host === myDid;
   } catch {
-    return false
+    return false;
   }
 }
 
@@ -162,7 +162,7 @@ function sortByCreatedAtDesc(entries: FeedEntry[]): FeedEntry[] {
     (a, b) =>
       new Date(b.post.createdAt).getTime() -
       new Date(a.post.createdAt).getTime(),
-  )
+  );
 }
 
 /**
@@ -172,34 +172,36 @@ function sortByCreatedAtDesc(entries: FeedEntry[]): FeedEntry[] {
  * - "Mine" — the viewer's own shares, with delete buttons.
  */
 export function Feed() {
-  const agent = useAtprotoStore((s) => s.agent)
-  const did = useAtprotoStore((s) => s.did)
-  const sdk = useAuthStore((s) => s.sdk)
-  const [tab, setTab] = useState<FeedTab>(loadPersistedTab)
+  const agent = useAtprotoStore((s) => s.agent);
+  const did = useAtprotoStore((s) => s.did);
+  const sdk = useAuthStore((s) => s.sdk);
+  const [tab, setTab] = useState<FeedTab>(loadPersistedTab);
 
   useEffect(() => {
     try {
-      localStorage.setItem(FEED_TAB_KEY, tab)
+      localStorage.setItem(FEED_TAB_KEY, tab);
     } catch {
       // ignore — best-effort persistence
     }
-  }, [tab])
-  const [entries, setEntries] = useState<FeedEntry[] | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  }, [tab]);
+  const [entries, setEntries] = useState<FeedEntry[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   /**
    * Source URIs (the original at-uri of each repinned post) currently in the
    * viewer's own repo. Used in the Following tab to render "Saved" — paired
    * with a separate "the source author is me" DID check so we also recognize
    * reposts of our own originals.
    */
-  const [savedSourceUris, setSavedSourceUris] = useState<Set<string>>(new Set())
+  const [savedSourceUris, setSavedSourceUris] = useState<Set<string>>(
+    new Set(),
+  );
 
   const refresh = useCallback(async () => {
-    if (!agent || !did) return
-    setLoading(true)
-    setError(null)
-    setEntries([])
+    if (!agent || !did) return;
+    setLoading(true);
+    setError(null);
+    setEntries([]);
     try {
       // For Following tab, also load my own records in parallel so we know
       // which entries are already saved. Skipped for Mine tab (the entries
@@ -207,7 +209,7 @@ export function Feed() {
       // `sourceUri` field from each of my records — that's the at-uri of
       // the original post the save came from.
       const mySourcesPromise =
-        tab === 'following'
+        tab === "following"
           ? listSharePosts(did, 100)
               .then(
                 (records) =>
@@ -218,40 +220,40 @@ export function Feed() {
                   ),
               )
               .catch(() => new Set<string>())
-          : Promise.resolve(new Set<string>())
+          : Promise.resolve(new Set<string>());
 
-      const authors = await loadAuthors(did, tab)
-      const accumulated: FeedEntry[] = []
+      const authors = await loadAuthors(did, tab);
+      const accumulated: FeedEntry[] = [];
       await pMap(
         authors,
         FEED_FETCH_CONCURRENCY,
         async (author) => {
-          const records = await listSharePosts(author.did, 20)
+          const records = await listSharePosts(author.did, 20);
           return records.map((r) => ({
             uri: r.uri,
             author,
             post: r.value,
-          }))
+          }));
         },
         (batch) => {
-          if (batch.length === 0) return
-          accumulated.push(...batch)
-          setEntries(sortByCreatedAtDesc(accumulated))
+          if (batch.length === 0) return;
+          accumulated.push(...batch);
+          setEntries(sortByCreatedAtDesc(accumulated));
         },
-      )
+      );
 
-      setSavedSourceUris(await mySourcesPromise)
+      setSavedSourceUris(await mySourcesPromise);
     } catch (e) {
-      console.error('feed load failed:', e)
-      setError(e instanceof Error ? e.message : 'Failed to load feed')
+      console.error("feed load failed:", e);
+      setError(e instanceof Error ? e.message : "Failed to load feed");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [agent, did, tab])
+  }, [agent, did, tab]);
 
   useEffect(() => {
-    refresh()
-  }, [refresh])
+    refresh();
+  }, [refresh]);
 
   /**
    * Delete one of the viewer's own share entries — both the Sia indexer
@@ -269,40 +271,40 @@ export function Feed() {
    */
   const handleDelete = useCallback(
     async (entry: FeedEntry): Promise<void> => {
-      if (!agent || !sdk) throw new Error('Not connected')
-      let siaKey = entry.post.siaKey
+      if (!agent || !sdk) throw new Error("Not connected");
+      let siaKey = entry.post.siaKey;
       if (!siaKey) {
-        const obj = await sdk.sharedObject(entry.post.shareUrl)
-        siaKey = obj.id()
+        const obj = await sdk.sharedObject(entry.post.shareUrl);
+        siaKey = obj.id();
       }
       try {
-        await sdk.deleteObject(siaKey)
+        await sdk.deleteObject(siaKey);
       } catch (e) {
         // Treat "object not found" as success — if the indexer doesn't
         // know about it, the delete's intent is already satisfied. Lets us
         // clean up orphan atproto records when the indexer state diverged
         // (e.g. unpinned via another client, repos restored, etc.).
-        const msg = (e instanceof Error ? e.message : String(e)).toLowerCase()
-        if (!msg.includes('not found')) throw e
+        const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+        if (!msg.includes("not found")) throw e;
       }
-      await deleteSharePost(agent, entry.uri)
+      await deleteSharePost(agent, entry.uri);
       setEntries((prev) =>
         prev ? prev.filter((e) => e.uri !== entry.uri) : prev,
-      )
+      );
       // If the deleted record was a save, drop its source URI from the set
       // so the original re-shows "Save" in Following.
-      const sourceUri = entry.post.sourceUri
+      const sourceUri = entry.post.sourceUri;
       if (sourceUri) {
         setSavedSourceUris((prev) => {
-          if (!prev.has(sourceUri)) return prev
-          const next = new Set(prev)
-          next.delete(sourceUri)
-          return next
-        })
+          if (!prev.has(sourceUri)) return prev;
+          const next = new Set(prev);
+          next.delete(sourceUri);
+          return next;
+        });
       }
     },
     [agent, sdk],
-  )
+  );
 
   /**
    * Repin one of a friend's shares onto the viewer's own indexer + repo.
@@ -322,38 +324,38 @@ export function Feed() {
    */
   const handleSave = useCallback(
     async (entry: FeedEntry): Promise<void> => {
-      if (!agent || !sdk) throw new Error('Not connected')
-      const obj = await sdk.sharedObject(entry.post.shareUrl)
-      await sdk.pinObject(obj)
-      await sdk.updateObjectMetadata(obj)
-      const myShareUrl = sdk.shareObject(obj, SHARE_VALID_UNTIL)
-      const siaKey = obj.id()
+      if (!agent || !sdk) throw new Error("Not connected");
+      const obj = await sdk.sharedObject(entry.post.shareUrl);
+      await sdk.pinObject(obj);
+      await sdk.updateObjectMetadata(obj);
+      const myShareUrl = sdk.shareObject(obj, SHARE_VALID_UNTIL);
+      const siaKey = obj.id();
 
-      const { $type: _type, ...rest } = entry.post
-      const sourceUri = rest.sourceUri ?? entry.uri
+      const { $type: _type, ...rest } = entry.post;
+      const sourceUri = rest.sourceUri ?? entry.uri;
       await writeSharePost(agent, {
         ...rest,
         shareUrl: myShareUrl,
         siaKey,
         createdAt: new Date().toISOString(),
         sourceUri,
-      })
+      });
 
       setSavedSourceUris((prev) => {
-        const next = new Set(prev)
-        next.add(sourceUri)
-        return next
-      })
+        const next = new Set(prev);
+        next.add(sourceUri);
+        return next;
+      });
     },
     [agent, sdk],
-  )
+  );
 
   const tabClass = (active: boolean): string =>
     `text-xs px-3 py-1.5 rounded-lg transition-colors ${
       active
-        ? 'bg-neutral-900 text-white'
-        : 'text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100'
-    }`
+        ? "bg-neutral-900 text-white"
+        : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
+    }`;
 
   return (
     <div className="space-y-3">
@@ -361,15 +363,15 @@ export function Feed() {
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => setTab('following')}
-            className={tabClass(tab === 'following')}
+            onClick={() => setTab("following")}
+            className={tabClass(tab === "following")}
           >
             Following
           </button>
           <button
             type="button"
-            onClick={() => setTab('mine')}
-            className={tabClass(tab === 'mine')}
+            onClick={() => setTab("mine")}
+            className={tabClass(tab === "mine")}
           >
             Mine
           </button>
@@ -380,7 +382,7 @@ export function Feed() {
           disabled={loading}
           className="text-xs text-neutral-500 hover:text-neutral-900 disabled:opacity-40 transition-colors"
         >
-          {loading ? 'Refreshing...' : 'Refresh'}
+          {loading ? "Refreshing..." : "Refresh"}
         </button>
       </div>
 
@@ -406,10 +408,10 @@ export function Feed() {
               posterDid={e.author.did}
               sourceUri={e.post.sourceUri}
               thumbnail={e.post.thumbnail}
-              onDelete={tab === 'mine' ? () => handleDelete(e) : undefined}
-              onSave={tab === 'following' ? () => handleSave(e) : undefined}
+              onDelete={tab === "mine" ? () => handleDelete(e) : undefined}
+              onSave={tab === "following" ? () => handleSave(e) : undefined}
               isSaved={
-                tab === 'following' && isAlreadyMine(e, savedSourceUris, did)
+                tab === "following" && isAlreadyMine(e, savedSourceUris, did)
               }
             />
           ))}
@@ -424,11 +426,11 @@ export function Feed() {
 
       {entries && entries.length === 0 && !loading && (
         <p className="text-sm text-neutral-500 py-8 text-center">
-          {tab === 'mine'
-            ? 'You haven\u2019t shared anything yet — drop a file above.'
-            : 'No shares yet — follow someone who has, or switch to Mine.'}
+          {tab === "mine"
+            ? "You haven\u2019t shared anything yet — drop a file above."
+            : "No shares yet — follow someone who has, or switch to Mine."}
         </p>
       )}
     </div>
-  )
+  );
 }

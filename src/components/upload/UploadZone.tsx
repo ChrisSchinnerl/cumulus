@@ -1,48 +1,48 @@
-import { encodedSize, type ShardProgress } from '@siafoundation/sia-storage'
-import { useRef, useState } from 'react'
-import { SHARE_VALID_UNTIL, writeSharePost } from '../../lib/atproto'
-import { APP_KEY, DATA_SHARDS, PARITY_SHARDS } from '../../lib/constants'
-import { expandDataTransferToFiles } from '../../lib/dropzone'
-import { generateThumbnail } from '../../lib/preview'
-import { useAtprotoStore } from '../../stores/atproto'
-import { useAuthStore } from '../../stores/auth'
-import { DevNote } from '../DevNote'
+import { encodedSize, type ShardProgress } from "@siafoundation/sia-storage";
+import { useRef, useState } from "react";
+import { SHARE_VALID_UNTIL, writeSharePost } from "../../lib/atproto";
+import { APP_KEY, DATA_SHARDS, PARITY_SHARDS } from "../../lib/constants";
+import { expandDataTransferToFiles } from "../../lib/dropzone";
+import { generateThumbnail } from "../../lib/preview";
+import { useAtprotoStore } from "../../stores/atproto";
+import { useAuthStore } from "../../stores/auth";
+import { DevNote } from "../DevNote";
 
 type UploadProgress = {
   /** Display label — file name for single uploads, "N files" for batches. */
-  label: string
-  totalBytes: number
-  shardsDone: number
-  bytesUploaded: number
-  encodedTotal: number
+  label: string;
+  totalBytes: number;
+  shardsDone: number;
+  bytesUploaded: number;
+  encodedTotal: number;
   /** Number of files in the batch (≥1). */
-  fileCount: number
+  fileCount: number;
   /** Pinning/record-write phase counter (0..fileCount). Set after slabs upload completes. */
-  finalizedCount: number
-}
+  finalizedCount: number;
+};
 
 /** Format a byte count as a short human-readable string. */
 function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`;
 }
 
-const isPlaceholderKey = APP_KEY.startsWith('{' + '{')
+const isPlaceholderKey = APP_KEY.startsWith("{" + "{");
 
 /** Per-file pre-processing output: hash + optional preview. */
 type PreparedFile = {
-  file: File
-  hash: string
-  thumbnail: string | null
-}
+  file: File;
+  hash: string;
+  thumbnail: string | null;
+};
 
 export type UploadZoneProps = {
   /** Called after every successful per-file share-record write. Refreshes the feed incrementally. */
-  onUploaded?: () => void
-}
+  onUploaded?: () => void;
+};
 
 /**
  * Compose-only dropzone. Accepts both individual files and dropped folders;
@@ -51,44 +51,44 @@ export type UploadZoneProps = {
  * publishes one `app.cumulus.share.post` record per file.
  */
 export function UploadZone({ onUploaded }: UploadZoneProps) {
-  const sdk = useAuthStore((s) => s.sdk)
-  const agent = useAtprotoStore((s) => s.agent)
-  const [uploading, setUploading] = useState(false)
-  const [activeUpload, setActiveUpload] = useState<UploadProgress | null>(null)
-  const [dragOver, setDragOver] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const sdk = useAuthStore((s) => s.sdk);
+  const agent = useAtprotoStore((s) => s.agent);
+  const [uploading, setUploading] = useState(false);
+  const [activeUpload, setActiveUpload] = useState<UploadProgress | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   /**
    * Read each file in turn, computing SHA-256 + (for images) a JPEG preview.
    * Sequential rather than parallel to bound peak memory at one file at a time.
    */
   async function prepareFiles(files: File[]): Promise<PreparedFile[]> {
-    const prepared: PreparedFile[] = []
+    const prepared: PreparedFile[] = [];
     for (const file of files) {
       const hashBuffer = await crypto.subtle.digest(
-        'SHA-256',
+        "SHA-256",
         await file.arrayBuffer(),
-      )
-      const hash = new Uint8Array(hashBuffer).toHex()
-      const thumbnail = await generateThumbnail(file).catch(() => null)
-      prepared.push({ file, hash, thumbnail })
+      );
+      const hash = new Uint8Array(hashBuffer).toHex();
+      const thumbnail = await generateThumbnail(file).catch(() => null);
+      prepared.push({ file, hash, thumbnail });
     }
-    return prepared
+    return prepared;
   }
 
   async function uploadFiles(files: File[]) {
-    if (!sdk || !agent || files.length === 0) return
-    setUploading(true)
-    setError(null)
+    if (!sdk || !agent || files.length === 0) return;
+    setUploading(true);
+    setError(null);
 
-    const totalBytes = files.reduce((acc, f) => acc + f.size, 0)
+    const totalBytes = files.reduce((acc, f) => acc + f.size, 0);
     // Aggregate encoded total — packing collapses per-file overhead, so this
     // overestimates the bytes that hit hosts, but it's the right denominator
     // for a deterministic 0..100% bar.
     const encodedTotal = Number(
       encodedSize(totalBytes, DATA_SHARDS, PARITY_SHARDS),
-    )
+    );
     setActiveUpload({
       label: files.length === 1 ? files[0].name : `${files.length} files`,
       totalBytes,
@@ -97,47 +97,47 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
       encodedTotal,
       fileCount: files.length,
       finalizedCount: 0,
-    })
+    });
 
     try {
-      const prepared = await prepareFiles(files)
+      const prepared = await prepareFiles(files);
 
-      let shardsDone = 0
-      let bytesUploaded = 0
+      let shardsDone = 0;
+      let bytesUploaded = 0;
       const packed = sdk.uploadPacked({
         maxInflight: 10,
         dataShards: DATA_SHARDS,
         parityShards: PARITY_SHARDS,
         onShardUploaded: (progress: ShardProgress) => {
-          shardsDone++
-          bytesUploaded += progress.shardSize
+          shardsDone++;
+          bytesUploaded += progress.shardSize;
           setActiveUpload((prev) =>
             prev ? { ...prev, shardsDone, bytesUploaded } : prev,
-          )
+          );
         },
-      })
+      });
 
       try {
         for (const p of prepared) {
-          await packed.add(p.file.stream())
+          await packed.add(p.file.stream());
         }
-        const objects = await packed.finalize()
+        const objects = await packed.finalize();
 
         for (let i = 0; i < objects.length; i++) {
-          const obj = objects[i]
-          const p = prepared[i]
+          const obj = objects[i];
+          const p = prepared[i];
           const meta = {
             name: p.file.name,
-            type: p.file.type || 'application/octet-stream',
+            type: p.file.type || "application/octet-stream",
             size: p.file.size,
             hash: p.hash,
             createdAt: Date.now(),
-          }
-          obj.updateMetadata(new TextEncoder().encode(JSON.stringify(meta)))
-          await sdk.pinObject(obj)
-          await sdk.updateObjectMetadata(obj)
+          };
+          obj.updateMetadata(new TextEncoder().encode(JSON.stringify(meta)));
+          await sdk.pinObject(obj);
+          await sdk.updateObjectMetadata(obj);
 
-          const shareUrl = sdk.shareObject(obj, SHARE_VALID_UNTIL)
+          const shareUrl = sdk.shareObject(obj, SHARE_VALID_UNTIL);
           await writeSharePost(agent, {
             shareUrl,
             siaKey: obj.id(),
@@ -146,38 +146,38 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
             size: meta.size,
             createdAt: new Date(meta.createdAt).toISOString(),
             ...(p.thumbnail ? { thumbnail: p.thumbnail } : {}),
-          })
+          });
 
           setActiveUpload((prev) =>
             prev ? { ...prev, finalizedCount: i + 1 } : prev,
-          )
-          onUploaded?.()
+          );
+          onUploaded?.();
         }
       } catch (e) {
         try {
-          packed.cancel()
+          packed.cancel();
         } catch {
           // ignore — primary error is what we'll surface
         }
-        throw e
+        throw e;
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Upload failed')
+      setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
-      setUploading(false)
-      setActiveUpload(null)
+      setUploading(false);
+      setActiveUpload(null);
     }
   }
 
   async function handleDrop(e: React.DragEvent) {
-    e.preventDefault()
-    setDragOver(false)
-    const files = await expandDataTransferToFiles(e.dataTransfer)
-    if (files.length > 0) await uploadFiles(files)
+    e.preventDefault();
+    setDragOver(false);
+    const files = await expandDataTransferToFiles(e.dataTransfer);
+    if (files.length > 0) await uploadFiles(files);
   }
 
   async function handlePicked(fileList: FileList) {
-    await uploadFiles(Array.from(fileList))
+    await uploadFiles(Array.from(fileList));
   }
 
   const uploadPercent = activeUpload
@@ -187,16 +187,16 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
           (activeUpload.bytesUploaded / activeUpload.encodedTotal) * 100,
         ),
       )
-    : 0
+    : 0;
 
   return (
     <div className="space-y-4">
       {isPlaceholderKey && (
         <DevNote title="Replace Your App Key">
           <p>
-            You&apos;re using the template placeholder. Set your own key in{' '}
+            You&apos;re using the template placeholder. Set your own key in{" "}
             <code className="text-amber-700">src/lib/constants.ts</code> or
-            scaffold a fresh project with{' '}
+            scaffold a fresh project with{" "}
             <code className="text-amber-700">bunx create-sia-app</code>.
           </p>
         </DevNote>
@@ -218,19 +218,19 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
       <label
         onDrop={handleDrop}
         onDragOver={(e) => {
-          e.preventDefault()
-          setDragOver(true)
+          e.preventDefault();
+          setDragOver(true);
         }}
         onDragLeave={(e) => {
-          e.preventDefault()
-          setDragOver(false)
+          e.preventDefault();
+          setDragOver(false);
         }}
         className={`relative block border-2 border-dashed rounded-xl p-10 text-center transition-all duration-150 ${
           uploading
-            ? 'border-neutral-300 cursor-default'
+            ? "border-neutral-300 cursor-default"
             : dragOver
-              ? 'border-green-600 bg-green-600/5 cursor-pointer'
-              : 'border-neutral-300 hover:border-neutral-400 cursor-pointer'
+              ? "border-green-600 bg-green-600/5 cursor-pointer"
+              : "border-neutral-300 hover:border-neutral-400 cursor-pointer"
         }`}
       >
         <input
@@ -240,16 +240,16 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
           className="hidden"
           disabled={uploading}
           onChange={(e) => {
-            if (e.target.files) handlePicked(e.target.files)
-            e.target.value = ''
+            if (e.target.files) handlePicked(e.target.files);
+            e.target.value = "";
           }}
         />
 
         {activeUpload ? (
           <div className="space-y-3">
             <p className="text-neutral-700 text-sm">
-              Uploading{' '}
-              <span className="text-neutral-900">{activeUpload.label}</span>{' '}
+              Uploading{" "}
+              <span className="text-neutral-900">{activeUpload.label}</span>{" "}
               <span className="text-neutral-500">
                 ({formatBytes(activeUpload.totalBytes)})
               </span>
@@ -268,8 +268,8 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
               {activeUpload.shardsDone} shards
               {activeUpload.fileCount > 1 && (
                 <>
-                  {' '}
-                  · {activeUpload.finalizedCount}/{activeUpload.fileCount}{' '}
+                  {" "}
+                  · {activeUpload.finalizedCount}/{activeUpload.fileCount}{" "}
                   posted
                 </>
               )}
@@ -299,5 +299,5 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
         )}
       </label>
     </div>
-  )
+  );
 }
