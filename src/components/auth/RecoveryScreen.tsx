@@ -1,9 +1,9 @@
-import { useState } from 'react'
 import {
   type Builder,
   generateRecoveryPhrase,
   validateRecoveryPhrase,
 } from '@siafoundation/sia-storage'
+import { useState } from 'react'
 import { useAuthStore } from '../../stores/auth'
 import { CopyButton } from '../CopyButton'
 import { DevNote } from '../DevNote'

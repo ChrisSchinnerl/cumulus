@@ -1,24 +1,23 @@
-import { useMemo } from 'react'
 import { APP_NAME } from '../lib/constants'
+import { useAtprotoStore } from '../stores/atproto'
 import { useAuthStore } from '../stores/auth'
-import { CopyButton } from './CopyButton'
 
+/**
+ * Top app bar. Shows the Bluesky handle/avatar (when fully connected) and a
+ * single sign-out button that clears both the Sia and atproto sessions.
+ */
 export function Navbar() {
-  const step = useAuthStore((s) => s.step)
-  const sdk = useAuthStore((s) => s.sdk)
-  const reset = useAuthStore((s) => s.reset)
-  const isConnected = step === 'connected'
+  const siaStep = useAuthStore((s) => s.step)
+  const resetSia = useAuthStore((s) => s.reset)
+  const handle = useAtprotoStore((s) => s.handle)
+  const avatar = useAtprotoStore((s) => s.avatar)
+  const session = useAtprotoStore((s) => s.session)
+  const atprotoSignOut = useAtprotoStore((s) => s.signOut)
+  const isConnected = siaStep === 'connected' && session !== null
 
-  const publicKey = useMemo(() => {
-    try {
-      return sdk?.appKey().publicKey() ?? null
-    } catch {
-      return null
-    }
-  }, [sdk])
-
-  function handleSignOut() {
-    reset()
+  async function handleSignOut() {
+    await atprotoSignOut()
+    resetSia()
     window.location.reload()
   }
 
@@ -28,19 +27,22 @@ export function Navbar() {
         <h1 className="text-sm font-semibold text-neutral-900 tracking-tight">
           {APP_NAME}
         </h1>
-        {isConnected && publicKey && (
+        {isConnected && (
           <div className="flex items-center gap-3">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-green-600" />
             </span>
-            <span
-              className="text-[11px] font-mono text-neutral-500"
-              title={publicKey}
-            >
-              {publicKey.slice(0, 8)}...{publicKey.slice(-6)}
-            </span>
-            <CopyButton value={publicKey} label="Public key copied" />
+            {avatar && (
+              <img
+                src={avatar}
+                alt=""
+                className="w-6 h-6 rounded-full bg-neutral-200"
+              />
+            )}
+            {handle && (
+              <span className="text-xs text-neutral-700">@{handle}</span>
+            )}
             <button
               type="button"
               onClick={handleSignOut}

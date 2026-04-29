@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
 import type { Builder } from '@siafoundation/sia-storage'
+import { useEffect, useRef, useState } from 'react'
 import { useAuthStore } from '../../stores/auth'
 import { CopyButton } from '../CopyButton'
 import { DevNote } from '../DevNote'
