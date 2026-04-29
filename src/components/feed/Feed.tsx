@@ -3,6 +3,8 @@ import {
   deleteSharePost,
   getPublicAgent,
   listSharePosts,
+  SHARE_VALID_UNTIL,
+  writeSharePost,
 } from '../../lib/atproto'
 import type { SharePost } from '../../lib/lexicons'
 import { useAtprotoStore } from '../../stores/atproto'
@@ -157,6 +159,12 @@ export function Feed() {
   const [entries, setEntries] = useState<FeedEntry[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * `siaKey`s of records currently in the viewer's own repo. Used in the
+   * Following tab to render "Saved" instead of "Save" for entries the viewer
+   * has already repinned. Populated alongside the feed load.
+   */
+  const [savedSiaKeys, setSavedSiaKeys] = useState<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
     if (!agent || !did) return
@@ -164,6 +172,23 @@ export function Feed() {
     setError(null)
     setEntries([])
     try {
+      // For Following tab, also load my own records in parallel so we know
+      // which entries are already saved. Skipped for Mine tab (the entries
+      // *are* my own, so the question doesn't apply).
+      const myKeysPromise =
+        tab === 'following'
+          ? listSharePosts(did, 100)
+              .then(
+                (records) =>
+                  new Set(
+                    records
+                      .map((r) => r.value.siaKey)
+                      .filter((k): k is string => !!k),
+                  ),
+              )
+              .catch(() => new Set<string>())
+          : Promise.resolve(new Set<string>())
+
       const authors = await loadAuthors(did, tab)
       const accumulated: FeedEntry[] = []
       await pMap(
@@ -183,6 +208,8 @@ export function Feed() {
           setEntries(sortByCreatedAtDesc(accumulated))
         },
       )
+
+      setSavedSiaKeys(await myKeysPromise)
     } catch (e) {
       console.error('feed load failed:', e)
       setError(e instanceof Error ? e.message : 'Failed to load feed')
@@ -222,6 +249,49 @@ export function Feed() {
       setEntries((prev) =>
         prev ? prev.filter((e) => e.uri !== entry.uri) : prev,
       )
+      setSavedSiaKeys((prev) => {
+        if (!siaKey || !prev.has(siaKey)) return prev
+        const next = new Set(prev)
+        next.delete(siaKey)
+        return next
+      })
+    },
+    [agent, sdk],
+  )
+
+  /**
+   * Repin one of a friend's shares onto the viewer's own indexer + repo.
+   *
+   * Pinning Sia objects is content-addressed — the indexer just registers a
+   * reference; the underlying shards already live on hosts. We then mint a
+   * fresh share URL from our indexer (so my followers can fetch from me even
+   * if the original author later deletes) and write a copy of the record to
+   * my repo. All metadata fields from the original (thumbnail, mimeType,
+   * future show/season/episode, etc.) are preserved by spreading; only
+   * `shareUrl`, `siaKey`, and `createdAt` are overridden.
+   */
+  const handleSave = useCallback(
+    async (entry: FeedEntry): Promise<void> => {
+      if (!agent || !sdk) throw new Error('Not connected')
+      const obj = await sdk.sharedObject(entry.post.shareUrl)
+      await sdk.pinObject(obj)
+      await sdk.updateObjectMetadata(obj)
+      const myShareUrl = sdk.shareObject(obj, SHARE_VALID_UNTIL)
+      const siaKey = obj.id()
+
+      const { $type: _type, ...rest } = entry.post
+      await writeSharePost(agent, {
+        ...rest,
+        shareUrl: myShareUrl,
+        siaKey,
+        createdAt: new Date().toISOString(),
+      })
+
+      setSavedSiaKeys((prev) => {
+        const next = new Set(prev)
+        next.add(siaKey)
+        return next
+      })
     },
     [agent, sdk],
   )
@@ -283,6 +353,12 @@ export function Feed() {
               shareUrl={e.post.shareUrl}
               thumbnail={e.post.thumbnail}
               onDelete={tab === 'mine' ? () => handleDelete(e) : undefined}
+              onSave={tab === 'following' ? () => handleSave(e) : undefined}
+              isSaved={
+                tab === 'following' && e.post.siaKey
+                  ? savedSiaKeys.has(e.post.siaKey)
+                  : false
+              }
             />
           ))}
         </div>

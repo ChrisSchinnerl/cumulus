@@ -1,6 +1,6 @@
 import { encodedSize, type ShardProgress } from '@siafoundation/sia-storage'
 import { useRef, useState } from 'react'
-import { writeSharePost } from '../../lib/atproto'
+import { SHARE_VALID_UNTIL, writeSharePost } from '../../lib/atproto'
 import { APP_KEY, DATA_SHARDS, PARITY_SHARDS } from '../../lib/constants'
 import { expandDataTransferToFiles } from '../../lib/dropzone'
 import { generateThumbnail } from '../../lib/preview'
@@ -31,12 +31,6 @@ function formatBytes(bytes: number): string {
 }
 
 const isPlaceholderKey = APP_KEY.startsWith('{' + '{')
-
-/**
- * `validUntil` for share URLs. We use a far-future date so shares effectively
- * never expire — atproto records are the source of truth for visibility.
- */
-const SHARE_VALID_UNTIL = new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000)
 
 /** Per-file pre-processing output: hash + optional preview. */
 type PreparedFile = {

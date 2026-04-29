@@ -80,6 +80,18 @@ export type FeedItemProps = {
    * + Sia object) and is expected to remove this item from its list.
    */
   onDelete?: () => Promise<void>
+  /**
+   * Optional repin callback. When provided AND `isSaved` is false, a Save
+   * button is rendered. The parent pins the underlying Sia object to the
+   * viewer's indexer and writes a copy of the record to their repo.
+   */
+  onSave?: () => Promise<void>
+  /**
+   * Whether the viewer's repo already contains a record for this same
+   * underlying Sia object. When true, the button reads "Saved" and is
+   * disabled — useful only when `onSave` would otherwise be active.
+   */
+  isSaved?: boolean
 }
 
 /**
@@ -98,10 +110,13 @@ export function FeedItem({
   shareUrl,
   thumbnail,
   onDelete,
+  onSave,
+  isSaved = false,
 }: FeedItemProps) {
   const sdk = useAuthStore((s) => s.sdk)
   const [downloading, setDownloading] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [progress, setProgress] = useState<{
     done: number
     total: number
@@ -185,6 +200,19 @@ export function FeedItem({
     }
     // On success, the parent removes this row from its list, so we don't
     // bother resetting `deleting` — the component unmounts.
+  }
+
+  async function handleSave() {
+    if (!onSave || saving || isSaved) return
+    setSaving(true)
+    setError(null)
+    try {
+      await onSave()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -299,16 +327,26 @@ export function FeedItem({
             <button
               type="button"
               onClick={handleDownload}
-              disabled={downloading || deleting}
+              disabled={downloading || deleting || saving}
               className="text-xs px-3 py-1.5 border border-neutral-300 rounded-lg hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-default transition-colors"
             >
               {downloading ? 'Downloading...' : 'Download'}
             </button>
+            {onSave && (
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={downloading || saving || isSaved}
+                className="text-xs px-3 py-1.5 border border-neutral-300 rounded-lg hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-default transition-colors"
+              >
+                {saving ? 'Saving...' : isSaved ? 'Saved' : 'Save'}
+              </button>
+            )}
             {onDelete && (
               <button
                 type="button"
                 onClick={handleDelete}
-                disabled={downloading || deleting}
+                disabled={downloading || deleting || saving}
                 className="text-xs px-3 py-1.5 border border-red-200 text-red-700 rounded-lg hover:bg-red-50 disabled:opacity-40 disabled:cursor-default transition-colors"
               >
                 {deleting ? 'Deleting...' : 'Delete'}

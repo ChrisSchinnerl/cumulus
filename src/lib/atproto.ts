@@ -19,6 +19,16 @@ import {
  */
 export const OAUTH_SCOPE = 'atproto transition:generic'
 
+/**
+ * `validUntil` for share URLs minted by upload + repin flows. We use a
+ * far-future date so shares effectively never expire — atproto records are
+ * the source of truth for visibility, and deletes go through the indexer
+ * directly rather than the share URL's expiry.
+ */
+export const SHARE_VALID_UNTIL = new Date(
+  Date.now() + 100 * 365 * 24 * 60 * 60 * 1000,
+)
+
 let client: BrowserOAuthClient | null = null
 
 /**
