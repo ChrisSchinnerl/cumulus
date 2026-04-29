@@ -1,3 +1,4 @@
+import { AtUri } from '@atproto/api'
 import { useCallback, useEffect, useState } from 'react'
 import {
   deleteSharePost,
@@ -128,6 +129,33 @@ async function pMap<T, R>(
   )
 }
 
+/**
+ * Whether a feed entry represents content the viewer "already has." Two
+ * cases trigger this:
+ *
+ * 1. **The post's source is one we've already saved.** The post's "source"
+ *    is `post.sourceUri ?? post.uri` — an original post is its own source.
+ *    If that URI is in our saved-sources set, we've repinned this content.
+ *
+ * 2. **The post's source author is us.** A friend's repost of *our* original
+ *    has `sourceUri` whose DID is ours; in that case we have the content
+ *    natively without ever having saved it.
+ */
+function isAlreadyMine(
+  entry: FeedEntry,
+  savedSourceUris: Set<string>,
+  myDid: string | null,
+): boolean {
+  const source = entry.post.sourceUri ?? entry.uri
+  if (savedSourceUris.has(source)) return true
+  if (!myDid) return false
+  try {
+    return new AtUri(source).host === myDid
+  } catch {
+    return false
+  }
+}
+
 /** Newest-first sort over share entries by `createdAt`. */
 function sortByCreatedAtDesc(entries: FeedEntry[]): FeedEntry[] {
   return [...entries].sort(
@@ -161,9 +189,9 @@ export function Feed() {
   const [error, setError] = useState<string | null>(null)
   /**
    * Source URIs (the original at-uri of each repinned post) currently in the
-   * viewer's own repo. Used in the Following tab to render "Saved" instead
-   * of "Save" for entries the viewer has already repinned. Populated
-   * alongside the feed load.
+   * viewer's own repo. Used in the Following tab to render "Saved" — paired
+   * with a separate "the source author is me" DID check so we also recognize
+   * reposts of our own originals.
    */
   const [savedSourceUris, setSavedSourceUris] = useState<Set<string>>(new Set())
 
@@ -261,8 +289,8 @@ export function Feed() {
       setEntries((prev) =>
         prev ? prev.filter((e) => e.uri !== entry.uri) : prev,
       )
-      // If the deleted record was a repin, drop its source URI from the
-      // saved set so the original post in Following shows "Save" again.
+      // If the deleted record was a save, drop its source URI from the set
+      // so the original re-shows "Save" in Following.
       const sourceUri = entry.post.sourceUri
       if (sourceUri) {
         setSavedSourceUris((prev) => {
@@ -380,7 +408,9 @@ export function Feed() {
               thumbnail={e.post.thumbnail}
               onDelete={tab === 'mine' ? () => handleDelete(e) : undefined}
               onSave={tab === 'following' ? () => handleSave(e) : undefined}
-              isSaved={tab === 'following' && savedSourceUris.has(e.uri)}
+              isSaved={
+                tab === 'following' && isAlreadyMine(e, savedSourceUris, did)
+              }
             />
           ))}
         </div>
