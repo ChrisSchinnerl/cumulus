@@ -1,4 +1,4 @@
-import { Agent, AtUri } from '@atproto/api'
+import { Agent, AtpAgent, AtUri } from '@atproto/api'
 import {
   BrowserOAuthClient,
   buildAtprotoLoopbackClientMetadata,
@@ -55,6 +55,21 @@ export function getOAuthClient(): BrowserOAuthClient {
 /** Build an authenticated {@link Agent} from an OAuth session. */
 export function makeAgent(session: OAuthSession): Agent {
   return new Agent(session)
+}
+
+let publicAgent: AtpAgent | null = null
+
+/**
+ * Singleton unauthenticated agent pointed at the Bluesky AppView. Use this
+ * for `app.bsky.*` reads (profiles, follows, etc.) — not all PDSes proxy
+ * those methods, and the OAuth-authed agent's tokens may be rejected for
+ * AppView calls anyway.
+ */
+export function getPublicAgent(): AtpAgent {
+  if (!publicAgent) {
+    publicAgent = new AtpAgent({ service: 'https://api.bsky.app' })
+  }
+  return publicAgent
 }
 
 /**

@@ -1,6 +1,9 @@
-import type { Agent } from '@atproto/api'
 import { useCallback, useEffect, useState } from 'react'
-import { deleteSharePost, listSharePosts } from '../../lib/atproto'
+import {
+  deleteSharePost,
+  getPublicAgent,
+  listSharePosts,
+} from '../../lib/atproto'
 import type { SharePost } from '../../lib/lexicons'
 import { useAtprotoStore } from '../../stores/atproto'
 import { useAuthStore } from '../../stores/auth'
@@ -54,13 +57,13 @@ function loadPersistedTab(): FeedTab {
  *
  * - `following` → everyone the viewer follows (paged, up to {@link MAX_FOLLOWS}).
  * - `mine` → just the viewer.
+ *
+ * Uses the public AppView agent — `app.bsky.*` calls aren't reliably served
+ * by the user's own PDS through OAuth tokens.
  */
-async function loadAuthors(
-  agent: Agent,
-  viewerDid: string,
-  tab: FeedTab,
-): Promise<Author[]> {
-  const viewerProfile = await agent.app.bsky.actor.getProfile({
+async function loadAuthors(viewerDid: string, tab: FeedTab): Promise<Author[]> {
+  const pub = getPublicAgent()
+  const viewerProfile = await pub.app.bsky.actor.getProfile({
     actor: viewerDid,
   })
   const self: Author = {
@@ -74,7 +77,7 @@ async function loadAuthors(
   const follows: Author[] = []
   let cursor: string | undefined
   while (follows.length < MAX_FOLLOWS) {
-    const res = await agent.app.bsky.graph.getFollows({
+    const res = await pub.app.bsky.graph.getFollows({
       actor: viewerDid,
       limit: 100,
       cursor,
@@ -161,7 +164,7 @@ export function Feed() {
     setError(null)
     setEntries([])
     try {
-      const authors = await loadAuthors(agent, did, tab)
+      const authors = await loadAuthors(did, tab)
       const accumulated: FeedEntry[] = []
       await pMap(
         authors,

@@ -6,6 +6,7 @@ import { Feed } from './components/feed/Feed'
 import { Navbar } from './components/Navbar'
 import { Toasts } from './components/Toast'
 import { UploadZone } from './components/upload/UploadZone'
+import { initStreaming } from './lib/streaming'
 import { useAtprotoStore } from './stores/atproto'
 import { useAuthStore } from './stores/auth'
 
@@ -23,6 +24,9 @@ export default function App() {
 
   useEffect(() => {
     atprotoInit()
+    initStreaming().catch((e) => {
+      console.warn('Streaming Service Worker setup failed:', e)
+    })
   }, [atprotoInit])
 
   let body: React.ReactNode

@@ -1,5 +1,34 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { registerStream, unregisterStream } from '../../lib/streaming'
 import { useAuthStore } from '../../stores/auth'
+
+/** File extensions we treat as video when the stored MIME type is missing or generic. */
+const VIDEO_EXTENSIONS = [
+  '.mp4',
+  '.mov',
+  '.webm',
+  '.mkv',
+  '.m4v',
+  '.avi',
+  '.mpg',
+  '.mpeg',
+  '.ogv',
+  '.wmv',
+  '.flv',
+  '.3gp',
+]
+
+/**
+ * True if the file is a video, based on MIME type or filename extension.
+ * Falls back to extension matching because `application/octet-stream` records
+ * (uploaded when the browser couldn't infer a MIME) still need to render with
+ * the video affordance.
+ */
+function isVideoFile(name: string, mimeType: string): boolean {
+  if (mimeType.startsWith('video/')) return true
+  const lower = name.toLowerCase()
+  return VIDEO_EXTENSIONS.some((ext) => lower.endsWith(ext))
+}
 
 /** Format a byte count as a short human-readable string (e.g. "1.2 MB"). */
 function formatBytes(bytes: number): string {
@@ -78,6 +107,37 @@ export function FeedItem({
     total: number
   } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [streamId, setStreamId] = useState<string | null>(null)
+  const [streamUrl, setStreamUrl] = useState<string | null>(null)
+  const [opening, setOpening] = useState(false)
+  const isVideo = isVideoFile(name, mimeType)
+
+  useEffect(() => {
+    return () => {
+      if (streamId) unregisterStream(streamId)
+    }
+  }, [streamId])
+
+  async function handlePlay() {
+    if (opening || streamUrl) return
+    setOpening(true)
+    setError(null)
+    try {
+      const reg = await registerStream(shareUrl, mimeType)
+      setStreamId(reg.streamId)
+      setStreamUrl(reg.streamUrl)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Stream failed')
+    } finally {
+      setOpening(false)
+    }
+  }
+
+  function handleStop() {
+    if (streamId) unregisterStream(streamId)
+    setStreamId(null)
+    setStreamUrl(null)
+  }
 
   async function handleDownload() {
     if (!sdk) return
@@ -148,15 +208,55 @@ export function FeedItem({
             · {formatRelative(createdAt)}
           </span>
         </div>
-        {thumbnail && (
-          <div className="relative mt-2 rounded-lg overflow-hidden border border-neutral-200/80 bg-neutral-50 inline-block max-w-full">
-            <img
-              src={thumbnail}
-              alt={`Preview of ${name}`}
-              className="block max-h-60 max-w-full"
+        {streamUrl ? (
+          <div className="mt-2 space-y-1">
+            {/* biome-ignore lint/a11y/useMediaCaption: user-uploaded clip, no captions to attach */}
+            <video
+              src={streamUrl}
+              controls
+              autoPlay
+              playsInline
+              className="block max-h-96 max-w-full rounded-lg bg-black"
             />
-            {mimeType.startsWith('video/') && (
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20">
+            <button
+              type="button"
+              onClick={handleStop}
+              className="text-xs text-neutral-500 hover:text-neutral-900 transition-colors"
+            >
+              Close player
+            </button>
+          </div>
+        ) : isVideo ? (
+          <button
+            type="button"
+            onClick={handlePlay}
+            disabled={opening}
+            className="relative mt-2 block rounded-lg overflow-hidden border border-neutral-200/80 bg-neutral-50 max-w-full p-0 disabled:opacity-70"
+            aria-label={`Play ${name}`}
+          >
+            {thumbnail ? (
+              <img
+                src={thumbnail}
+                alt={`Preview of ${name}`}
+                className="block max-h-60 max-w-full"
+              />
+            ) : (
+              <div className="block w-80 max-w-full aspect-video bg-black" />
+            )}
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20">
+              {opening ? (
+                <svg
+                  className="w-10 h-10 animate-spin text-white drop-shadow-md"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                  <path d="M12 2a10 10 0 019.17 6" />
+                </svg>
+              ) : (
                 <svg
                   className="w-12 h-12 text-white drop-shadow-md"
                   viewBox="0 0 24 24"
@@ -165,9 +265,19 @@ export function FeedItem({
                 >
                   <path d="M8 5v14l11-7z" />
                 </svg>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          </button>
+        ) : (
+          thumbnail && (
+            <div className="relative mt-2 rounded-lg overflow-hidden border border-neutral-200/80 bg-neutral-50 inline-block max-w-full">
+              <img
+                src={thumbnail}
+                alt={`Preview of ${name}`}
+                className="block max-h-60 max-w-full"
+              />
+            </div>
+          )
         )}
         <div className="mt-2 flex items-center justify-between gap-3">
           <div className="min-w-0">
