@@ -3,7 +3,7 @@ import { useRef, useState } from 'react'
 import { writeSharePost } from '../../lib/atproto'
 import { APP_KEY, DATA_SHARDS, PARITY_SHARDS } from '../../lib/constants'
 import { expandDataTransferToFiles } from '../../lib/dropzone'
-import { generateImageThumbnail } from '../../lib/preview'
+import { generateThumbnail } from '../../lib/preview'
 import { useAtprotoStore } from '../../stores/atproto'
 import { useAuthStore } from '../../stores/auth'
 import { DevNote } from '../DevNote'
@@ -77,7 +77,7 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
         await file.arrayBuffer(),
       )
       const hash = new Uint8Array(hashBuffer).toHex()
-      const thumbnail = await generateImageThumbnail(file).catch(() => null)
+      const thumbnail = await generateThumbnail(file).catch(() => null)
       prepared.push({ file, hash, thumbnail })
     }
     return prepared

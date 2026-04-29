@@ -149,12 +149,24 @@ export function FeedItem({
           </span>
         </div>
         {thumbnail && (
-          <div className="mt-2 rounded-lg overflow-hidden border border-neutral-200/80 bg-neutral-50 inline-block max-w-full">
+          <div className="relative mt-2 rounded-lg overflow-hidden border border-neutral-200/80 bg-neutral-50 inline-block max-w-full">
             <img
               src={thumbnail}
               alt={`Preview of ${name}`}
               className="block max-h-60 max-w-full"
             />
+            {mimeType.startsWith('video/') && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20">
+                <svg
+                  className="w-12 h-12 text-white drop-shadow-md"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </div>
+            )}
           </div>
         )}
         <div className="mt-2 flex items-center justify-between gap-3">
