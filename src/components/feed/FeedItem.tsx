@@ -472,7 +472,7 @@ export function FeedItem({
               type="button"
               onClick={handleDownload}
               disabled={downloading || deleting || saving}
-              className="text-xs px-3 py-1.5 border border-neutral-300 rounded-lg hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-default transition-colors"
+              className="text-xs px-3 py-1.5 min-w-28 text-center border border-neutral-300 rounded-lg hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-default transition-colors"
             >
               {downloading ? "Downloading..." : "Download"}
             </button>
@@ -481,7 +481,7 @@ export function FeedItem({
                 type="button"
                 onClick={handleSave}
                 disabled={downloading || saving}
-                className="text-xs px-3 py-1.5 border border-green-200 text-green-700 rounded-lg hover:bg-green-50 disabled:opacity-40 disabled:cursor-default transition-colors"
+                className="text-xs px-3 py-1.5 min-w-20 text-center border border-green-200 text-green-700 rounded-lg hover:bg-green-50 disabled:opacity-40 disabled:cursor-default transition-colors"
               >
                 {saving ? "Saving..." : "Save"}
               </button>
@@ -491,7 +491,7 @@ export function FeedItem({
                 type="button"
                 onClick={handleDelete}
                 disabled={downloading || deleting || saving}
-                className="text-xs px-3 py-1.5 border border-red-200 text-red-700 rounded-lg hover:bg-red-50 disabled:opacity-40 disabled:cursor-default transition-colors"
+                className="text-xs px-3 py-1.5 min-w-22 text-center border border-red-200 text-red-700 rounded-lg hover:bg-red-50 disabled:opacity-40 disabled:cursor-default transition-colors"
               >
                 {deleting ? "Deleting..." : "Delete"}
               </button>
