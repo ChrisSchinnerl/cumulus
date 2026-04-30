@@ -29,13 +29,6 @@ export type ParsedQuery = {
   freetext: string[];
 };
 
-/** Empty query — matches everything. */
-export const EMPTY_QUERY: ParsedQuery = {
-  required: [],
-  excluded: [],
-  freetext: [],
-};
-
 /**
  * Tokenize an input string into whitespace-separated tokens, preserving
  * double-quoted phrases as single tokens (with the quotes stripped).
@@ -81,7 +74,7 @@ function parseKv(token: string): TagConstraint | null {
  * - bare word or `"quoted phrase"` → free-text substring match against the
  *   filename and the joined tag pairs
  *
- * The empty string yields {@link EMPTY_QUERY}, which matches every entry.
+ * The empty string yields a query that matches every entry.
  */
 export function parseQuery(input: string): ParsedQuery {
   const tokens = tokenize(input);
@@ -149,35 +142,6 @@ export function matchEntry(
     }
   }
   return true;
-}
-
-/**
- * Parse user-entered tags from a textarea — one `key: value` per line.
- * Duplicate keys are overwritten (last wins). Whitespace around key and
- * value is trimmed; the value can include commas to express multi-value.
- */
-export function parseUserTags(input: string): Tags {
-  const out: Tags = {};
-  const lines = input
-    .split(/\n+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  for (const line of lines) {
-    const colon = line.indexOf(":");
-    if (colon <= 0) continue;
-    const key = line.slice(0, colon).trim().toLowerCase();
-    const value = line.slice(colon + 1).trim();
-    if (key && value) out[key] = value;
-  }
-  return out;
-}
-
-/** Format tags back to one-per-line text for display or re-editing. */
-export function tagsToText(tags: Tags | undefined): string {
-  if (!tags) return "";
-  return Object.entries(tags)
-    .map(([k, v]) => `${k}: ${v}`)
-    .join("\n");
 }
 
 /**

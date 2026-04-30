@@ -13,7 +13,6 @@ type AtprotoState = {
   agent: Agent | null;
   did: string | null;
   handle: string | null;
-  displayName: string | null;
   avatar: string | null;
   initialized: boolean;
   /**
@@ -39,19 +38,17 @@ type AtprotoState = {
   signOut: () => Promise<void>;
 };
 
-/** Look up the user's profile (handle, displayName, avatar) by DID. */
+/** Look up the user's profile (handle, avatar) by DID. */
 async function fetchProfile(
   agent: Agent,
   did: string,
 ): Promise<{
   handle: string;
-  displayName: string | null;
   avatar: string | null;
 }> {
   const res = await agent.app.bsky.actor.getProfile({ actor: did });
   return {
     handle: res.data.handle,
-    displayName: res.data.displayName ?? null,
     avatar: res.data.avatar ?? null,
   };
 }
@@ -61,7 +58,6 @@ export const useAtprotoStore = create<AtprotoState>((set, get) => ({
   agent: null,
   did: null,
   handle: null,
-  displayName: null,
   avatar: null,
   initialized: false,
   initializing: false,
@@ -82,7 +78,6 @@ export const useAtprotoStore = create<AtprotoState>((set, get) => ({
           agent,
           did,
           handle: profile?.handle ?? null,
-          displayName: profile?.displayName ?? null,
           avatar: profile?.avatar ?? null,
           initialized: true,
           initializing: false,
@@ -116,7 +111,6 @@ export const useAtprotoStore = create<AtprotoState>((set, get) => ({
       agent: null,
       did: null,
       handle: null,
-      displayName: null,
       avatar: null,
       error: null,
     });

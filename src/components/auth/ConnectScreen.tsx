@@ -2,7 +2,6 @@ import { Builder } from "@siafoundation/sia-storage";
 import { useState } from "react";
 import { APP_META, DEFAULT_INDEXER_URL } from "../../lib/constants";
 import { useAuthStore } from "../../stores/auth";
-import { DevNote } from "../DevNote";
 
 export function ConnectScreen({
   builder,
@@ -52,20 +51,6 @@ export function ConnectScreen({
             Enter your Sia indexer URL to get started
           </p>
         </div>
-
-        <DevNote title="Indexer URL & App Key">
-          <p>
-            The indexer URL points to your Sia storage provider. The default is{" "}
-            <code className="text-amber-700">https://sia.storage</code>. Your
-            app key (set in{" "}
-            <code className="text-amber-700">src/lib/constants.ts</code>)
-            uniquely identifies your app to the indexer.
-          </p>
-          <p className="mt-1">
-            If the connection fails with a CORS error, the indexer must allow
-            requests from this app&apos;s origin.
-          </p>
-        </DevNote>
 
         <div className="space-y-4">
           <input
