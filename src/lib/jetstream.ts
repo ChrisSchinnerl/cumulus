@@ -11,19 +11,28 @@ const JETSTREAM_URL = "wss://jetstream2.us-east.bsky.network/subscribe";
 /** Backoff between reconnect attempts when the socket drops. */
 const RECONNECT_DELAY_MS = 2000;
 
-/** A normalized create event we hand to subscribers. */
-export type CumulusEvent = {
-  /** Author DID. */
-  did: string;
-  /** Reconstructed at-uri of the new record. */
-  uri: string;
-  /** Record key in the author's repo. */
-  rkey: string;
-  /** Validated `app.cumulus.share.post` payload. */
-  record: SharePost;
-  /** Microseconds since epoch — Jetstream's monotonic ordering field. */
-  timeUs: number;
-};
+/** A normalized create or delete event we hand to subscribers. */
+export type CumulusEvent =
+  | {
+      kind: "create";
+      /** Author DID. */
+      did: string;
+      /** Reconstructed at-uri of the new record. */
+      uri: string;
+      /** Record key in the author's repo. */
+      rkey: string;
+      /** Validated `app.cumulus.share.post` payload. */
+      record: SharePost;
+      /** Microseconds since epoch — Jetstream's monotonic ordering field. */
+      timeUs: number;
+    }
+  | {
+      kind: "delete";
+      did: string;
+      uri: string;
+      rkey: string;
+      timeUs: number;
+    };
 
 type Handler = (event: CumulusEvent) => void;
 
@@ -70,20 +79,30 @@ function connect(): void {
     };
     if (d.kind !== "commit") return;
     const c = d.commit;
-    if (!c || c.collection !== NSID_SHARE_POST || c.operation !== "create") {
-      return;
-    }
-    if (!isSharePost(c.record)) return;
+    if (!c || c.collection !== NSID_SHARE_POST) return;
     if (!d.did || !c.rkey) return;
     if (typeof d.time_us === "number") cursor = d.time_us;
 
-    const event: CumulusEvent = {
-      did: d.did,
-      uri: `at://${d.did}/${c.collection}/${c.rkey}`,
-      rkey: c.rkey,
-      record: c.record,
-      timeUs: d.time_us ?? 0,
-    };
+    const uri = `at://${d.did}/${c.collection}/${c.rkey}`;
+    const timeUs = d.time_us ?? 0;
+    let event: CumulusEvent;
+    if (c.operation === "create") {
+      if (!isSharePost(c.record)) return;
+      event = {
+        kind: "create",
+        did: d.did,
+        uri,
+        rkey: c.rkey,
+        record: c.record,
+        timeUs,
+      };
+    } else if (c.operation === "delete") {
+      event = { kind: "delete", did: d.did, uri, rkey: c.rkey, timeUs };
+    } else {
+      // `update` operations exist but aren't meaningful for share posts —
+      // skip them rather than churn the feed on edits.
+      return;
+    }
     for (const h of subscribers) {
       try {
         h(event);

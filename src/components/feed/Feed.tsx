@@ -274,30 +274,49 @@ export function Feed() {
 
   /**
    * Live-update subscription. Fires once per mount; reads current state
-   * through refs so we never resubscribe on tab/did/entries changes. New
-   * `app.cumulus.share.post` creates from in-scope authors get prepended
-   * to the feed without waiting for a manual refresh.
+   * through refs so we never resubscribe on tab/did/entries changes.
+   *
+   * - **create** events from in-scope authors get prepended to the feed.
+   * - **delete** events remove the matching entry from the feed (regardless
+   *   of author — even if a friend deletes a post we saved, theirs vanishes
+   *   from our Following view) AND clean up `savesBySource` if the deleted
+   *   record happens to be one of our own saves (e.g. deleted from another
+   *   device).
    */
   useEffect(() => {
     return subscribeJetstream((event: CumulusEvent) => {
-      const t = tabRef.current;
-      const myDid = didRef.current;
-      const author = authorsByDidRef.current.get(event.did);
-      // Tab-aware filter: Library only includes our own DID; Following
-      // includes anyone we follow (which is what authorsByDid covers).
-      if (!author) return;
-      if (t === "library" && event.did !== myDid) return;
-      // Skip duplicates — backfill or earlier event may have already added it.
-      const cur = entriesRef.current;
-      if (cur?.some((e) => e.uri === event.uri)) return;
-      const newEntry: FeedEntry = {
-        uri: event.uri,
-        author,
-        post: event.record,
-      };
+      if (event.kind === "create") {
+        const t = tabRef.current;
+        const myDid = didRef.current;
+        const author = authorsByDidRef.current.get(event.did);
+        if (!author) return;
+        if (t === "library" && event.did !== myDid) return;
+        const cur = entriesRef.current;
+        if (cur?.some((e) => e.uri === event.uri)) return;
+        const newEntry: FeedEntry = {
+          uri: event.uri,
+          author,
+          post: event.record,
+        };
+        setEntries((prev) =>
+          prev ? sortByCreatedAtDesc([newEntry, ...prev]) : [newEntry],
+        );
+        return;
+      }
+      // delete
       setEntries((prev) =>
-        prev ? sortByCreatedAtDesc([newEntry, ...prev]) : [newEntry],
+        prev ? prev.filter((e) => e.uri !== event.uri) : prev,
       );
+      setSavesBySource((prev) => {
+        for (const [src, save] of prev) {
+          if (save.uri === event.uri) {
+            const next = new Map(prev);
+            next.delete(src);
+            return next;
+          }
+        }
+        return prev;
+      });
     });
   }, []);
 
