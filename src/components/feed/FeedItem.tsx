@@ -132,6 +132,11 @@ export function FeedItem({
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const isVideo = isVideoFile(name, mimeType);
+  const isImage = mimeType.startsWith("image/");
+  const [viewing, setViewing] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageLoading, setImageLoading] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
   const [originalAuthor, setOriginalAuthor] = useState<{
     handle: string;
   } | null>(null);
@@ -167,6 +172,62 @@ export function FeedItem({
       if (streamId) unregisterStream(streamId);
     };
   }, [streamId]);
+
+  // Revoke any held image blob URL on unmount so memory doesn't leak when a
+  // user scrolls away with the lightbox closed via component teardown.
+  useEffect(() => {
+    return () => {
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+    };
+  }, [imageUrl]);
+
+  // ESC closes the open lightbox.
+  useEffect(() => {
+    if (!viewing) return;
+    function onKey(ev: KeyboardEvent) {
+      if (ev.key === "Escape") closeImageView();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // closeImageView is intentionally omitted — it's stable enough for this
+    // narrow case and including it would re-bind the listener every render.
+  }, [viewing]);
+
+  function closeImageView() {
+    if (imageUrl) URL.revokeObjectURL(imageUrl);
+    setImageUrl(null);
+    setViewing(false);
+    setImageError(null);
+  }
+
+  /**
+   * Open the full-size image lightbox. Streams the original image bytes from
+   * Sia into a Blob, then sets that as the displayed source. Spinner shows
+   * while downloading; errors land inside the overlay.
+   */
+  async function handleViewImage() {
+    if (!sdk || viewing) return;
+    setViewing(true);
+    setImageLoading(true);
+    setImageError(null);
+    try {
+      const object = await sdk.sharedObject(shareUrl);
+      const stream = sdk.download(object, { maxInflight: 10 });
+      const reader = stream.getReader();
+      const chunks: Uint8Array[] = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+      const blob = new Blob(chunks as BlobPart[], { type: mimeType });
+      setImageUrl(URL.createObjectURL(blob));
+    } catch (e) {
+      setImageError(e instanceof Error ? e.message : "Failed to load image");
+    } finally {
+      setImageLoading(false);
+    }
+  }
 
   async function handlePlay() {
     if (opening || streamUrl) return;
@@ -251,6 +312,7 @@ export function FeedItem({
   }
 
   return (
+    <>
     <div className="flex items-start gap-3 py-4">
       {avatar ? (
         <img
@@ -351,7 +413,21 @@ export function FeedItem({
             </div>
           </button>
         ) : (
-          thumbnail && (
+          thumbnail &&
+          (isImage ? (
+            <button
+              type="button"
+              onClick={handleViewImage}
+              className="relative mt-2 block rounded-lg overflow-hidden border border-neutral-200/80 bg-neutral-50 max-w-full p-0 hover:opacity-90 transition-opacity"
+              aria-label={`View ${name}`}
+            >
+              <img
+                src={thumbnail}
+                alt={`Preview of ${name}`}
+                className="block max-h-60 max-w-full"
+              />
+            </button>
+          ) : (
             <div className="relative mt-2 rounded-lg overflow-hidden border border-neutral-200/80 bg-neutral-50 inline-block max-w-full">
               <img
                 src={thumbnail}
@@ -359,7 +435,7 @@ export function FeedItem({
                 className="block max-h-60 max-w-full"
               />
             </div>
-          )
+          ))
         )}
         <div className="mt-2 flex items-center justify-between gap-3">
           <div className="min-w-0">
@@ -415,5 +491,48 @@ export function FeedItem({
         )}
       </div>
     </div>
+    {viewing && (
+      // biome-ignore lint/a11y/useKeyWithClickEvents: ESC handled via window listener; click-outside-to-dismiss is the dialog idiom
+      <div
+        onClick={closeImageView}
+        className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4"
+      >
+        {imageLoading && !imageUrl && (
+          <svg
+            className="w-12 h-12 animate-spin text-white drop-shadow-md"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+            <path d="M12 2a10 10 0 019.17 6" />
+          </svg>
+        )}
+        {imageError && (
+          <p className="text-white text-sm bg-red-900/40 border border-red-500/40 rounded-lg px-4 py-2.5">
+            {imageError}
+          </p>
+        )}
+        {imageUrl && (
+          <img
+            src={imageUrl}
+            alt={name}
+            onClick={(ev) => ev.stopPropagation()}
+            className="max-w-full max-h-full object-contain"
+          />
+        )}
+        <button
+          type="button"
+          onClick={closeImageView}
+          aria-label="Close"
+          className="absolute top-4 right-4 text-white/80 hover:text-white text-2xl leading-none"
+        >
+          ×
+        </button>
+      </div>
+    )}
+    </>
   );
 }
