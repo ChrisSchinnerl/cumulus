@@ -1,5 +1,5 @@
 import { AtUri } from "@atproto/api";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   deleteSharePost,
   getPublicAgent,
@@ -7,6 +7,7 @@ import {
   SHARE_VALID_UNTIL,
   writeSharePost,
 } from "../../lib/atproto";
+import { type CumulusEvent, subscribeJetstream } from "../../lib/jetstream";
 import { NSID_SHARE_POST, type SharePost } from "../../lib/lexicons";
 import { useAtprotoStore } from "../../stores/atproto";
 import { useAuthStore } from "../../stores/auth";
@@ -189,6 +190,25 @@ export function Feed() {
     new Map(),
   );
 
+  /**
+   * Live-update plumbing. The Jetstream subscriber runs once on mount and
+   * needs access to the current tab/did/entries/authors-map without
+   * re-subscribing each time those change — so we mirror them through refs.
+   */
+  const tabRef = useRef(tab);
+  const didRef = useRef(did);
+  const entriesRef = useRef(entries);
+  const authorsByDidRef = useRef<Map<string, Author>>(new Map());
+  useEffect(() => {
+    tabRef.current = tab;
+  }, [tab]);
+  useEffect(() => {
+    didRef.current = did;
+  }, [did]);
+  useEffect(() => {
+    entriesRef.current = entries;
+  }, [entries]);
+
   const refresh = useCallback(async () => {
     if (!agent || !did) return;
     setLoading(true);
@@ -215,6 +235,11 @@ export function Feed() {
           : Promise.resolve(new Map<string, MySave>());
 
       const authors = await loadAuthors(did, tab);
+      // Populate the did→author map so live Jetstream events arriving for
+      // these authors can be hydrated with handle/displayName/avatar.
+      const authorsMap = new Map<string, Author>();
+      for (const a of authors) authorsMap.set(a.did, a);
+      authorsByDidRef.current = authorsMap;
       const accumulated: FeedEntry[] = [];
       await pMap(
         authors,
@@ -246,6 +271,35 @@ export function Feed() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  /**
+   * Live-update subscription. Fires once per mount; reads current state
+   * through refs so we never resubscribe on tab/did/entries changes. New
+   * `app.cumulus.share.post` creates from in-scope authors get prepended
+   * to the feed without waiting for a manual refresh.
+   */
+  useEffect(() => {
+    return subscribeJetstream((event: CumulusEvent) => {
+      const t = tabRef.current;
+      const myDid = didRef.current;
+      const author = authorsByDidRef.current.get(event.did);
+      // Tab-aware filter: Library only includes our own DID; Following
+      // includes anyone we follow (which is what authorsByDid covers).
+      if (!author) return;
+      if (t === "library" && event.did !== myDid) return;
+      // Skip duplicates — backfill or earlier event may have already added it.
+      const cur = entriesRef.current;
+      if (cur?.some((e) => e.uri === event.uri)) return;
+      const newEntry: FeedEntry = {
+        uri: event.uri,
+        author,
+        post: event.record,
+      };
+      setEntries((prev) =>
+        prev ? sortByCreatedAtDesc([newEntry, ...prev]) : [newEntry],
+      );
+    });
+  }, []);
 
   /**
    * Delete one of the viewer's own records — both the Sia indexer object and
