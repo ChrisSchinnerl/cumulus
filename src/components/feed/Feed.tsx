@@ -26,7 +26,7 @@ type FeedEntry = {
 };
 
 /** Which slice of share posts to render. */
-export type FeedTab = "following" | "mine";
+export type FeedTab = "following" | "library";
 
 /**
  * Maximum number of follows we page through when building the "Following"
@@ -48,7 +48,7 @@ const FEED_TAB_KEY = "cumulus:feed-tab";
 function loadPersistedTab(): FeedTab {
   try {
     const v = localStorage.getItem(FEED_TAB_KEY);
-    if (v === "mine" || v === "following") return v;
+    if (v === "library" || v === "following") return v;
   } catch {
     // localStorage disabled or quota exceeded — fall through to default.
   }
@@ -59,7 +59,7 @@ function loadPersistedTab(): FeedTab {
  * Build the list of authors to query for the given tab.
  *
  * - `following` → everyone the viewer follows (paged, up to {@link MAX_FOLLOWS}).
- * - `mine` → just the viewer.
+ * - `library` → just the viewer (their own posts + saves).
  *
  * Uses the public AppView agent — `app.bsky.*` calls aren't reliably served
  * by the user's own PDS through OAuth tokens.
@@ -75,7 +75,7 @@ async function loadAuthors(viewerDid: string, tab: FeedTab): Promise<Author[]> {
     displayName: viewerProfile.data.displayName ?? null,
     avatar: viewerProfile.data.avatar ?? null,
   };
-  if (tab === "mine") return [self];
+  if (tab === "library") return [self];
 
   const follows: Author[] = [];
   let cursor: string | undefined;
@@ -161,7 +161,7 @@ function sortByCreatedAtDesc(entries: FeedEntry[]): FeedEntry[] {
  * The main social feed. Switches between two tabs:
  *
  * - "Following" — shares from everyone the viewer follows on Bluesky.
- * - "Mine" — the viewer's own shares, with delete buttons.
+ * - "Library" — the viewer's own shares (uploads + saves), with delete buttons.
  */
 export function Feed() {
   const agent = useAtprotoStore((s) => s.agent);
@@ -196,7 +196,7 @@ export function Feed() {
     setEntries([]);
     try {
       // For Following tab, also load my own records in parallel so we know
-      // which entries are already saved. Skipped for Mine tab (the entries
+      // which entries are already saved. Skipped for Library tab (the entries
       // *are* my own, so the question doesn't apply). Build a map keyed by
       // sourceUri so the Delete action can find the right *my-side* record.
       const mySavesPromise =
@@ -249,7 +249,7 @@ export function Feed() {
 
   /**
    * Delete one of the viewer's own records — both the Sia indexer object and
-   * the atproto share record. Shared by `handleDelete` (Mine tab) and
+   * the atproto share record. Shared by `handleDelete` (Library tab) and
    * `handleUnsave` (Following tab → red Delete on a previously saved post).
    *
    * Order: indexer first, atproto second. If the indexer call fails we
@@ -277,7 +277,7 @@ export function Feed() {
     [agent, sdk],
   );
 
-  /** Mine tab: delete the user's own entry from view + repo + indexer. */
+  /** Library tab: delete the user's own entry from view + repo + indexer. */
   const handleDelete = useCallback(
     async (entry: FeedEntry): Promise<void> => {
       await deleteMyRecord(entry.uri, entry.post);
@@ -390,10 +390,10 @@ export function Feed() {
           </button>
           <button
             type="button"
-            onClick={() => setTab("mine")}
-            className={tabClass(tab === "mine")}
+            onClick={() => setTab("library")}
+            className={tabClass(tab === "library")}
           >
-            Mine
+            Library
           </button>
         </div>
         <button
@@ -415,7 +415,7 @@ export function Feed() {
       {entries && entries.length > 0 && (
         <div className="divide-y divide-neutral-200/80">
           {entries.map((e) => {
-            // Compute the per-entry action callbacks. Mine tab → always
+            // Compute the per-entry action callbacks. Library tab → always
             // Delete on the entry itself. Following tab → if we've saved
             // it, Delete that *save* (lets the user undo accidental saves);
             // if we authored the original, no button (nothing to do); else
@@ -424,7 +424,7 @@ export function Feed() {
             const mySave = savesBySource.get(sourceOfP);
             const sourceIsMine = isSourceAuthorMe(e, did);
             const onDelete =
-              tab === "mine"
+              tab === "library"
                 ? () => handleDelete(e)
                 : tab === "following" && mySave
                   ? () => handleUnsave(mySave)
@@ -463,9 +463,9 @@ export function Feed() {
 
       {entries && entries.length === 0 && !loading && (
         <p className="text-sm text-neutral-500 py-8 text-center">
-          {tab === "mine"
+          {tab === "library"
             ? "You haven\u2019t shared anything yet — drop a file above."
-            : "No shares yet — follow someone who has, or switch to Mine."}
+            : "No shares yet — follow someone who has, or switch to Library."}
         </p>
       )}
     </div>
