@@ -13,8 +13,10 @@
     "@atproto/api": "^0.19.11",
     "@atproto/oauth-client-browser": "^0.3.42",
     "@siafoundation/sia-storage": "^0.0.9",
+    "parse-torrent-title": "^3.0.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "title-case": "^4.3.2",
     "zustand": "^5.0.12"
   },
   "devDependencies": {

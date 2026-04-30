@@ -1,11 +1,11 @@
 import { encodedSize, type ShardProgress } from "@siafoundation/sia-storage";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SHARE_VALID_UNTIL, writeSharePost } from "../../lib/atproto";
 import { APP_KEY, DATA_SHARDS, PARITY_SHARDS } from "../../lib/constants";
 import { expandDataTransferToFiles } from "../../lib/dropzone";
 import type { Tags } from "../../lib/lexicons";
 import { generateThumbnail } from "../../lib/preview";
-import { autoTagsFromFile, parseUserTags } from "../../lib/tags";
+import { autoTagsFromFile } from "../../lib/tags";
 import { useAtprotoStore } from "../../stores/atproto";
 import { useAuthStore } from "../../stores/auth";
 import { DevNote } from "../DevNote";
@@ -21,6 +21,15 @@ type UploadProgress = {
   fileCount: number;
   /** Pinning/record-write phase counter (0..fileCount). Set after slabs upload completes. */
   finalizedCount: number;
+};
+
+/** A staged file in the review dialog: file ref + per-file editable tags. */
+type StagedFile = {
+  file: File;
+  /** Editable list of (key, value) pairs. Same key may appear twice for multi-value tagging. */
+  tags: Array<{ key: string; value: string }>;
+  /** Whether the per-file tag editor is folded open. */
+  expanded: boolean;
 };
 
 /** Format a byte count as a short human-readable string. */
@@ -47,10 +56,11 @@ export type UploadZoneProps = {
 };
 
 /**
- * Compose-only dropzone. Accepts both individual files and dropped folders;
- * recursively flattens folders, batches everything into a single packed Sia
- * upload (which amortizes erasure-coding overhead across small files), then
- * publishes one `app.cumulus.share.post` record per file.
+ * Compose-only dropzone with a review step. Drop file(s) or a folder → opens
+ * a dialog listing every file with its size and a foldable tag editor; user
+ * adjusts tags then confirms. Confirmed batch goes through one packed Sia
+ * upload (amortizing erasure-coding overhead across small files), and one
+ * `app.cumulus.share.post` record per file is written.
  */
 export function UploadZone({ onUploaded }: UploadZoneProps) {
   const sdk = useAuthStore((s) => s.sdk);
@@ -59,19 +69,128 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
   const [activeUpload, setActiveUpload] = useState<UploadProgress | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tagInput, setTagInput] = useState("");
+  const [staged, setStaged] = useState<StagedFile[] | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   /**
-   * Merge user-entered tags (from the textarea) with auto-detected tags
-   * (from filename + MIME). User-entered values take precedence on key
-   * collision so the user can override auto-detected season/episode/etc.
+   * Stage a list of dropped/picked files into the review dialog. Files start
+   * with empty tag editors — auto-tagging is opt-in via the magic-wand
+   * button in the dialog so the user always controls what gets attached.
    */
-  function buildTags(file: File): Tags | undefined {
-    const auto = autoTagsFromFile(file.name, file.type);
-    const user = parseUserTags(tagInput);
-    const merged: Tags = { ...auto, ...user };
-    return Object.keys(merged).length > 0 ? merged : undefined;
+  function stage(files: File[]) {
+    if (files.length === 0) return;
+    const items: StagedFile[] = files.map((file) => ({
+      file,
+      tags: [],
+      expanded: false,
+    }));
+    setStaged(items);
+  }
+
+  /**
+   * Recompute auto-detected tags for every staged file and overwrite the
+   * inferred keys with fresh values. User-added keys outside the auto-tag
+   * set (e.g. `genre`, `mood`, custom tags) are preserved as-is — only the
+   * keys auto-tagging actually produces get replaced. All files get
+   * auto-expanded so the user can verify what landed.
+   */
+  function applyAutoTags() {
+    setStaged((prev) => {
+      if (!prev) return prev;
+      return prev.map((sf) => {
+        const auto = autoTagsFromFile(sf.file.name, sf.file.type);
+        const autoKeys = new Set(
+          Object.keys(auto).map((k) => k.toLowerCase()),
+        );
+        const preserved = sf.tags.filter(
+          (p) => !autoKeys.has(p.key.trim().toLowerCase()),
+        );
+        const additions = Object.entries(auto).map(([key, value]) => ({
+          key,
+          value,
+        }));
+        return {
+          ...sf,
+          tags: [...preserved, ...additions],
+          expanded: true,
+        };
+      });
+    });
+  }
+
+  /** Esc closes the review dialog. */
+  useEffect(() => {
+    if (!staged) return;
+    function onKey(ev: KeyboardEvent) {
+      if (ev.key === "Escape") setStaged(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [staged]);
+
+  function toggleExpand(idx: number) {
+    setStaged((prev) =>
+      prev
+        ? prev.map((sf, i) =>
+            i === idx ? { ...sf, expanded: !sf.expanded } : sf,
+          )
+        : prev,
+    );
+  }
+
+  /**
+   * Update a tag row. If the row is the trailing "always-blank" row and the
+   * user has typed anything, promote it into a real tag (which causes a
+   * fresh trailing row to appear on next render).
+   */
+  function updateTagRow(
+    fileIdx: number,
+    tagIdx: number,
+    next: { key: string; value: string },
+  ) {
+    setStaged((prev) => {
+      if (!prev) return prev;
+      const out = prev.slice();
+      const sf = out[fileIdx];
+      const isTrailing = tagIdx === sf.tags.length;
+      if (isTrailing) {
+        if (next.key.length === 0 && next.value.length === 0) return prev;
+        out[fileIdx] = { ...sf, tags: [...sf.tags, next] };
+      } else {
+        const newTags = sf.tags.slice();
+        newTags[tagIdx] = next;
+        out[fileIdx] = { ...sf, tags: newTags };
+      }
+      return out;
+    });
+  }
+
+  function removeTagRow(fileIdx: number, tagIdx: number) {
+    setStaged((prev) => {
+      if (!prev) return prev;
+      const out = prev.slice();
+      const sf = out[fileIdx];
+      out[fileIdx] = {
+        ...sf,
+        tags: sf.tags.filter((_, i) => i !== tagIdx),
+      };
+      return out;
+    });
+  }
+
+  /** Collapse a per-file tag list into the storage-format Tags object. */
+  function pairsToTags(
+    pairs: Array<{ key: string; value: string }>,
+  ): Tags | undefined {
+    const out: Tags = {};
+    for (const { key, value } of pairs) {
+      const k = key.trim().toLowerCase();
+      const v = value.trim();
+      if (!k || !v) continue;
+      out[k] = out[k] ? `${out[k]}, ${v}` : v;
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
   }
 
   /**
@@ -92,30 +211,28 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
     return prepared;
   }
 
-  async function uploadFiles(files: File[]) {
-    if (!sdk || !agent || files.length === 0) return;
+  async function uploadStaged(items: StagedFile[]) {
+    if (!sdk || !agent || items.length === 0) return;
     setUploading(true);
     setError(null);
+    setStaged(null);
 
-    const totalBytes = files.reduce((acc, f) => acc + f.size, 0);
-    // Aggregate encoded total — packing collapses per-file overhead, so this
-    // overestimates the bytes that hit hosts, but it's the right denominator
-    // for a deterministic 0..100% bar.
+    const totalBytes = items.reduce((acc, sf) => acc + sf.file.size, 0);
     const encodedTotal = Number(
       encodedSize(totalBytes, DATA_SHARDS, PARITY_SHARDS),
     );
     setActiveUpload({
-      label: files.length === 1 ? files[0].name : `${files.length} files`,
+      label: items.length === 1 ? items[0].file.name : `${items.length} files`,
       totalBytes,
       shardsDone: 0,
       bytesUploaded: 0,
       encodedTotal,
-      fileCount: files.length,
+      fileCount: items.length,
       finalizedCount: 0,
     });
 
     try {
-      const prepared = await prepareFiles(files);
+      const prepared = await prepareFiles(items.map((sf) => sf.file));
 
       let shardsDone = 0;
       let bytesUploaded = 0;
@@ -141,6 +258,7 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
         for (let i = 0; i < objects.length; i++) {
           const obj = objects[i];
           const p = prepared[i];
+          const item = items[i];
           const meta = {
             name: p.file.name,
             type: p.file.type || "application/octet-stream",
@@ -153,7 +271,7 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
           await sdk.updateObjectMetadata(obj);
 
           const shareUrl = sdk.shareObject(obj, SHARE_VALID_UNTIL);
-          const tags = buildTags(p.file);
+          const tags = pairsToTags(item.tags);
           await writeSharePost(agent, {
             shareUrl,
             siaKey: obj.id(),
@@ -190,11 +308,11 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
     e.preventDefault();
     setDragOver(false);
     const files = await expandDataTransferToFiles(e.dataTransfer);
-    if (files.length > 0) await uploadFiles(files);
+    stage(files);
   }
 
-  async function handlePicked(fileList: FileList) {
-    await uploadFiles(Array.from(fileList));
+  function handlePicked(fileList: FileList) {
+    stage(Array.from(fileList));
   }
 
   const uploadPercent = activeUpload
@@ -231,17 +349,6 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
           </button>
         </div>
       )}
-
-      <textarea
-        value={tagInput}
-        onChange={(e) => setTagInput(e.target.value)}
-        placeholder={
-          "Tags (one per line) — e.g.\ntype: tvshow\nname: One Step Beyond\nseason: 1\nepisode: 5\nresolution: 1080p\ntvdb: 76479"
-        }
-        rows={3}
-        disabled={uploading}
-        className="w-full px-3 py-2 text-sm bg-white border border-neutral-300 rounded-lg text-neutral-900 placeholder-neutral-400 focus:outline-none focus:border-green-600 font-mono"
-      />
 
       <label
         onDrop={handleDrop}
@@ -326,6 +433,334 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
           </div>
         )}
       </label>
+
+      {!activeUpload && (
+        <div className="text-center">
+          <input
+            ref={(el) => {
+              folderInputRef.current = el;
+              // `webkitdirectory` isn't in React's standard HTMLInputElement
+              // attribute typings — set it imperatively.
+              if (el) el.setAttribute("webkitdirectory", "");
+            }}
+            type="file"
+            multiple
+            className="hidden"
+            disabled={uploading}
+            onChange={(e) => {
+              if (e.target.files) handlePicked(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => folderInputRef.current?.click()}
+            disabled={uploading}
+            className="text-xs text-neutral-500 hover:text-neutral-900 underline disabled:opacity-40 transition-colors"
+          >
+            or choose a folder
+          </button>
+        </div>
+      )}
+
+      {staged && (
+        <ReviewDialog
+          staged={staged}
+          onCancel={() => setStaged(null)}
+          onConfirm={() => uploadStaged(staged)}
+          onToggleExpand={toggleExpand}
+          onUpdateTag={updateTagRow}
+          onRemoveTag={removeTagRow}
+          onAutoTag={applyAutoTags}
+        />
+      )}
+    </div>
+  );
+}
+
+type ReviewDialogProps = {
+  staged: StagedFile[];
+  onCancel: () => void;
+  onConfirm: () => void;
+  onToggleExpand: (fileIdx: number) => void;
+  onUpdateTag: (
+    fileIdx: number,
+    tagIdx: number,
+    next: { key: string; value: string },
+  ) => void;
+  onRemoveTag: (fileIdx: number, tagIdx: number) => void;
+  /** Apply auto-detected tags to every staged file (filename + MIME hints). */
+  onAutoTag: () => void;
+};
+
+/**
+ * Pre-upload review modal. Lists every staged file with its size and a
+ * foldable per-file tag editor. Header shows the batch size, the Sia-encoded
+ * size, and the viewer's remaining indexer quota. Confirm kicks off the
+ * actual upload.
+ */
+function ReviewDialog({
+  staged,
+  onCancel,
+  onConfirm,
+  onToggleExpand,
+  onUpdateTag,
+  onRemoveTag,
+  onAutoTag,
+}: ReviewDialogProps) {
+  const sdk = useAuthStore((s) => s.sdk);
+  const totalBytes = staged.reduce((acc, sf) => acc + sf.file.size, 0);
+  // What the indexer actually charges quota for: data shards + slab padding,
+  // *without* the parity-shard redundancy multiplier. Derived from
+  // `encodedSize` (which includes parity) by scaling back by data/(data+parity).
+  const encodedTotal = Number(
+    encodedSize(totalBytes, DATA_SHARDS, PARITY_SHARDS),
+  );
+  const siaSize = Math.round(
+    (encodedTotal * DATA_SHARDS) / (DATA_SHARDS + PARITY_SHARDS),
+  );
+  const [remaining, setRemaining] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!sdk) return;
+    let cancelled = false;
+    sdk
+      .account()
+      .then((a) => {
+        if (!cancelled) setRemaining(Number(a.remainingStorage));
+      })
+      .catch(() => {
+        // Best-effort — quota line is hidden if the lookup fails.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sdk]);
+
+  const wouldExceed = remaining !== null && siaSize > remaining;
+
+  return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: ESC handled via window listener; click-outside-to-dismiss is the dialog idiom
+    <div
+      onClick={onCancel}
+      className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col"
+        role="dialog"
+        aria-label="Review upload"
+      >
+        <div className="px-6 py-4 border-b border-neutral-200/80">
+          <div className="flex items-center justify-between gap-4">
+            <h2 className="text-base font-semibold text-neutral-900">
+              Review {staged.length} {staged.length === 1 ? "file" : "files"}
+            </h2>
+            <button
+              type="button"
+              onClick={onCancel}
+              aria-label="Close"
+              className="text-neutral-400 hover:text-neutral-700 text-2xl leading-none"
+            >
+              ×
+            </button>
+          </div>
+          <p className="text-xs text-neutral-500 mt-1">
+            {formatBytes(totalBytes)} on disk ·{" "}
+            <span className="text-neutral-700">{formatBytes(siaSize)}</span>{" "}
+            on Sia
+            {remaining !== null && (
+              <>
+                {" · "}
+                <span
+                  className={
+                    wouldExceed
+                      ? "text-red-700 font-medium"
+                      : "text-neutral-700"
+                  }
+                >
+                  {formatBytes(remaining)} remaining
+                </span>
+              </>
+            )}
+          </p>
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={onAutoTag}
+              className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 border border-neutral-300 rounded-lg hover:bg-neutral-50 text-neutral-700 transition-colors"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="w-4 h-4"
+                aria-hidden="true"
+              >
+                <path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z" />
+                <path d="M18.45 4.5l.038.123a3 3 0 0 0 2.092 2.092l.123.038-.123.038a3 3 0 0 0-2.092 2.092l-.038.123-.038-.123a3 3 0 0 0-2.092-2.092l-.123-.038.123-.038a3 3 0 0 0 2.092-2.092l.038-.123Z" />
+              </svg>
+              Auto-tag
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+          {staged.map((sf, fi) => (
+            <StagedRow
+              key={fi}
+              fileIdx={fi}
+              staged={sf}
+              onToggleExpand={onToggleExpand}
+              onUpdateTag={onUpdateTag}
+              onRemoveTag={onRemoveTag}
+            />
+          ))}
+        </div>
+
+        <div className="px-6 py-4 border-t border-neutral-200/80 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-sm px-4 py-2 text-neutral-700 hover:bg-neutral-100 rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={wouldExceed}
+            className="text-sm px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+          >
+            {wouldExceed
+              ? "Not enough storage"
+              : `Upload ${staged.length} ${staged.length === 1 ? "file" : "files"}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type StagedRowProps = {
+  fileIdx: number;
+  staged: StagedFile;
+  onToggleExpand: (fileIdx: number) => void;
+  onUpdateTag: (
+    fileIdx: number,
+    tagIdx: number,
+    next: { key: string; value: string },
+  ) => void;
+  onRemoveTag: (fileIdx: number, tagIdx: number) => void;
+};
+
+/**
+ * One row in the review dialog: filename + size + chevron toggle, with the
+ * tag editor folded below it. The editor renders one input pair per existing
+ * tag plus a trailing blank pair — typing into the trailing pair promotes
+ * it into a real tag and a new blank pair appears beneath.
+ */
+function StagedRow({
+  fileIdx,
+  staged,
+  onToggleExpand,
+  onUpdateTag,
+  onRemoveTag,
+}: StagedRowProps) {
+  const rows = [...staged.tags, { key: "", value: "" }];
+
+  return (
+    <div className="border border-neutral-200/80 rounded-lg overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => onToggleExpand(fileIdx)}
+          aria-label={staged.expanded ? "Hide tags" : "Edit tags"}
+          className="text-neutral-400 hover:text-neutral-700 transition-colors shrink-0"
+        >
+          <svg
+            className={`w-4 h-4 transition-transform ${
+              staged.expanded ? "rotate-90" : ""
+            }`}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <path d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+        <p className="flex-1 min-w-0 text-sm text-neutral-900 truncate">
+          {staged.file.name}
+        </p>
+        <p className="text-xs text-neutral-500 shrink-0 tabular-nums">
+          {formatBytes(staged.file.size)}
+        </p>
+        {staged.tags.length > 0 && !staged.expanded && (
+          <span className="text-[11px] text-neutral-500 shrink-0 bg-neutral-100 rounded-full px-2 py-0.5">
+            {staged.tags.length} tag{staged.tags.length === 1 ? "" : "s"}
+          </span>
+        )}
+      </div>
+      {staged.expanded && (
+        <div className="px-3 pb-3 pt-1 space-y-1.5 border-t border-neutral-200/60 bg-neutral-50/50">
+          {rows.map((row, ti) => {
+            const isTrailing = ti === staged.tags.length;
+            return (
+              <div
+                key={`${fileIdx}-${ti}`}
+                className="flex items-center gap-1.5"
+              >
+                <input
+                  type="text"
+                  value={row.key}
+                  onChange={(ev) =>
+                    onUpdateTag(fileIdx, ti, {
+                      key: ev.target.value,
+                      value: row.value,
+                    })
+                  }
+                  placeholder="key"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="w-32 shrink-0 px-2 py-1 text-xs bg-white border border-neutral-300 rounded text-neutral-900 placeholder-neutral-400 focus:outline-none focus:border-green-600"
+                />
+                <span className="text-xs text-neutral-400">:</span>
+                <input
+                  type="text"
+                  value={row.value}
+                  onChange={(ev) =>
+                    onUpdateTag(fileIdx, ti, {
+                      key: row.key,
+                      value: ev.target.value,
+                    })
+                  }
+                  placeholder="value"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="flex-1 min-w-0 px-2 py-1 text-xs bg-white border border-neutral-300 rounded text-neutral-900 placeholder-neutral-400 focus:outline-none focus:border-green-600"
+                />
+                {!isTrailing && (
+                  <button
+                    type="button"
+                    onClick={() => onRemoveTag(fileIdx, ti)}
+                    aria-label="Remove tag"
+                    className="text-neutral-400 hover:text-red-600 transition-colors text-base leading-none px-1"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
