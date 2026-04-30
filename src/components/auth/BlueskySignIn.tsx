@@ -2,10 +2,23 @@ import { useState } from "react";
 import { useAtprotoStore } from "../../stores/atproto";
 import { DevNote } from "../DevNote";
 
+/** Bluesky's public OAuth entryway — used when the user enters an email. */
+const BLUESKY_ENTRYWAY = "https://bsky.social";
+
 /**
- * Sign-in screen for Bluesky/atproto. Prompts for a handle and kicks off
- * the OAuth redirect flow. Rendered after the Sia auth flow completes but
- * before any atproto session exists.
+ * Crude email check. Email addresses can't be used as atproto identifiers
+ * directly (no public email→PDS mapping), so we route them to Bluesky's
+ * entryway, which accepts email+password on its own login page.
+ */
+function looksLikeEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+/**
+ * Sign-in screen for Bluesky/atproto. Accepts either an atproto handle/DID
+ * or an email address — emails route to Bluesky's entryway since there's
+ * no public email→PDS lookup. Rendered after the Sia auth flow completes
+ * but before any atproto session exists.
  */
 export function BlueskySignIn() {
   const signIn = useAtprotoStore((s) => s.signIn);
@@ -14,11 +27,16 @@ export function BlueskySignIn() {
   const [error, setError] = useState<string | null>(null);
 
   async function handleSignIn() {
-    if (!handle.trim()) return;
+    const trimmed = handle.trim();
+    if (!trimmed) return;
     setLoading(true);
     setError(null);
     try {
-      await signIn(handle.trim());
+      // Email → Bluesky entryway URL (the user enters credentials on
+      // Bluesky's own login page). Anything else (handle, DID, PDS URL)
+      // passes through to OAuth resolution as-is.
+      const identifier = looksLikeEmail(trimmed) ? BLUESKY_ENTRYWAY : trimmed;
+      await signIn(identifier);
       // signInRedirect navigates the page — never reached on success.
     } catch (e) {
       setLoading(false);
@@ -34,8 +52,8 @@ export function BlueskySignIn() {
             Connect Bluesky
           </h1>
           <p className="text-neutral-600 text-sm">
-            Sign in with your atproto handle so your shared files appear in your
-            friends&apos; feeds.
+            Sign in with your Bluesky handle or email so your shared files
+            appear in your friends&apos; feeds.
           </p>
         </div>
 
@@ -64,7 +82,7 @@ export function BlueskySignIn() {
             onKeyDown={(e) => {
               if (e.key === "Enter") handleSignIn();
             }}
-            placeholder="alice.bsky.social"
+            placeholder="alice.bsky.social or bob@example.com"
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
