@@ -16,6 +16,15 @@ type AtprotoState = {
   displayName: string | null;
   avatar: string | null;
   initialized: boolean;
+  /**
+   * True for the entire duration of {@link AtprotoState.init} — set
+   * synchronously at the start, cleared atomically with `initialized` and
+   * the rest of the state at the end. Lets callers (e.g. App's render
+   * gate) keep showing the loading screen across the full async OAuth
+   * callback round-trip, without flashing the sign-in screen between
+   * "init done" and "session populated."
+   */
+  initializing: boolean;
   error: string | null;
 
   /**
@@ -55,10 +64,12 @@ export const useAtprotoStore = create<AtprotoState>((set, get) => ({
   displayName: null,
   avatar: null,
   initialized: false,
+  initializing: false,
   error: null,
 
   init: async () => {
-    if (get().initialized) return;
+    if (get().initialized || get().initializing) return;
+    set({ initializing: true });
     try {
       const client = await getOAuthClient();
       const result = await client.init();
@@ -74,15 +85,17 @@ export const useAtprotoStore = create<AtprotoState>((set, get) => ({
           displayName: profile?.displayName ?? null,
           avatar: profile?.avatar ?? null,
           initialized: true,
+          initializing: false,
           error: null,
         });
       } else {
-        set({ initialized: true });
+        set({ initialized: true, initializing: false });
       }
     } catch (e) {
       console.error("atproto init error:", e);
       set({
         initialized: true,
+        initializing: false,
         error: e instanceof Error ? e.message : String(e),
       });
     }

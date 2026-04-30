@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { isLoopbackHost } from "../../lib/atproto";
 import { useAtprotoStore } from "../../stores/atproto";
 import { DevNote } from "../DevNote";
 
@@ -57,16 +58,18 @@ export function BlueskySignIn() {
           </p>
         </div>
 
-        <DevNote title="Loopback OAuth">
-          <p>
-            This app runs as a loopback OAuth client — no client metadata is
-            hosted, and refresh tokens are short-lived (typically 1 day). The
-            library auto-redirects from{" "}
-            <code className="text-amber-700">localhost</code> to{" "}
-            <code className="text-amber-700">127.0.0.1</code> so the OAuth
-            origin matches.
-          </p>
-        </DevNote>
+        {isLoopbackHost() && (
+          <DevNote title="Loopback OAuth">
+            <p>
+              This app runs as a loopback OAuth client — no client metadata is
+              hosted, and refresh tokens are short-lived (typically 1 day). The
+              library auto-redirects from{" "}
+              <code className="text-amber-700">localhost</code> to{" "}
+              <code className="text-amber-700">127.0.0.1</code> so the OAuth
+              origin matches.
+            </p>
+          </DevNote>
+        )}
 
         {error && (
           <div className="px-4 py-2.5 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">

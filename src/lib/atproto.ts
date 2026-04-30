@@ -32,7 +32,7 @@ export const SHARE_VALID_UNTIL = new Date(
 let clientPromise: Promise<BrowserOAuthClient> | null = null;
 
 /** True if the current origin is one of the recognized loopback hosts. */
-function isLoopbackHost(): boolean {
+export function isLoopbackHost(): boolean {
   if (typeof window === "undefined") return false;
   const h = window.location.hostname;
   return h === "localhost" || h === "127.0.0.1" || h === "[::1]";

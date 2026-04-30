@@ -37,6 +37,7 @@ export default function App() {
   const siaStep = useAuthStore((s) => s.step);
   const atprotoInit = useAtprotoStore((s) => s.init);
   const atprotoInitialized = useAtprotoStore((s) => s.initialized);
+  const atprotoInitializing = useAtprotoStore((s) => s.initializing);
   const atprotoSession = useAtprotoStore((s) => s.session);
   const [feedKey, setFeedKey] = useState(0);
   const [route, setRoute] = useState<Route>(() =>
@@ -59,7 +60,7 @@ export default function App() {
   let body: React.ReactNode;
   if (siaStep !== "connected") {
     body = <AuthFlow />;
-  } else if (!atprotoInitialized) {
+  } else if (!atprotoInitialized || atprotoInitializing) {
     body = <LoadingScreen />;
   } else if (!atprotoSession) {
     body = <BlueskySignIn />;
