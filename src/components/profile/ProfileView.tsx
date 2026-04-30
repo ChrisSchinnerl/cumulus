@@ -134,6 +134,7 @@ export function ProfileView({ handle }: ProfileViewProps) {
               posterDid={profile.did}
               sourceUri={e.post.sourceUri}
               thumbnail={e.post.thumbnail}
+              tags={e.post.tags}
             />
           ))}
         </div>

@@ -5,6 +5,14 @@
 export const NSID_SHARE_POST = "app.cumulus.share.post";
 
 /**
+ * Free-form tags attached to a {@link SharePost}. Each key carries a single
+ * string value; multi-value lists are encoded as comma-separated text inside
+ * the value (`genre: "romance, action"`). Both keys and values are
+ * user-defined and matched case-insensitively at search time.
+ */
+export type Tags = Record<string, string>;
+
+/**
  * The shape of a single share record stored in the user's atproto repo.
  * `shareUrl` is what `sdk.shareObject(...)` returns and is fed back into
  * `sdk.sharedObject(url)` on the consumer side. The record itself is public;
@@ -39,6 +47,11 @@ export type SharePost = {
    * not displayed in the UI.
    */
   sourceUri?: string;
+  /**
+   * Optional user-defined metadata. Used by the search bar and rendered as
+   * clickable chips on each post (clicking adds `key:value` to the query).
+   */
+  tags?: Tags;
 };
 
 /** A `SharePost` paired with its repo URI + CID (as returned by listRecords). */
@@ -64,6 +77,16 @@ export function isSharePost(value: unknown): value is SharePost {
     typeof v.createdAt === "string" &&
     (v.siaKey === undefined || typeof v.siaKey === "string") &&
     (v.thumbnail === undefined || typeof v.thumbnail === "string") &&
-    (v.sourceUri === undefined || typeof v.sourceUri === "string")
+    (v.sourceUri === undefined || typeof v.sourceUri === "string") &&
+    (v.tags === undefined || isTags(v.tags))
   );
+}
+
+/** Runtime guard for the {@link Tags} shape. */
+function isTags(value: unknown): value is Tags {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  for (const v of Object.values(value as Record<string, unknown>)) {
+    if (typeof v !== "string") return false;
+  }
+  return true;
 }

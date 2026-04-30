@@ -1,6 +1,7 @@
 import { AtUri } from "@atproto/api";
 import { useEffect, useState } from "react";
 import { getProfileByDid } from "../../lib/atproto";
+import type { Tags } from "../../lib/lexicons";
 import { registerStream, unregisterStream } from "../../lib/streaming";
 import { useAuthStore } from "../../stores/auth";
 
@@ -97,6 +98,17 @@ export type FeedItemProps = {
    * can undo the save.
    */
   onSave?: () => Promise<void>;
+  /**
+   * Optional user-defined tags on this post. Rendered as a row of small chips
+   * under the file metadata.
+   */
+  tags?: Tags;
+  /**
+   * Optional click handler for tag chips. When provided, each chip becomes
+   * a button that calls back with `(key, value)` — typically used by the
+   * parent feed to add `key:value` to its search input.
+   */
+  onTagClick?: (key: string, value: string) => void;
 };
 
 /**
@@ -118,6 +130,8 @@ export function FeedItem({
   thumbnail,
   onDelete,
   onSave,
+  tags,
+  onTagClick,
 }: FeedItemProps) {
   const sdk = useAuthStore((s) => s.sdk);
   const [downloading, setDownloading] = useState(false);
@@ -484,6 +498,38 @@ export function FeedItem({
             )}
           </div>
         </div>
+        {tags && Object.keys(tags).length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {Object.entries(tags).flatMap(([k, v]) =>
+              v
+                .split(",")
+                .map((part) => part.trim())
+                .filter(Boolean)
+                .map((value) => {
+                  const className =
+                    "text-xs px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600 border border-neutral-200";
+                  const label = `${k}:${value}`;
+                  if (onTagClick) {
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        onClick={() => onTagClick(k, value)}
+                        className={`${className} hover:bg-neutral-200 hover:text-neutral-900 transition-colors`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  }
+                  return (
+                    <span key={label} className={className}>
+                      {label}
+                    </span>
+                  );
+                }),
+            )}
+          </div>
+        )}
         {error && (
           <p className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">
             {error}

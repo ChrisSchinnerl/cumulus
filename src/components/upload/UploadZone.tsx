@@ -3,7 +3,9 @@ import { useRef, useState } from "react";
 import { SHARE_VALID_UNTIL, writeSharePost } from "../../lib/atproto";
 import { APP_KEY, DATA_SHARDS, PARITY_SHARDS } from "../../lib/constants";
 import { expandDataTransferToFiles } from "../../lib/dropzone";
+import type { Tags } from "../../lib/lexicons";
 import { generateThumbnail } from "../../lib/preview";
+import { autoTagsFromFile, parseUserTags } from "../../lib/tags";
 import { useAtprotoStore } from "../../stores/atproto";
 import { useAuthStore } from "../../stores/auth";
 import { DevNote } from "../DevNote";
@@ -57,7 +59,20 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
   const [activeUpload, setActiveUpload] = useState<UploadProgress | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tagInput, setTagInput] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Merge user-entered tags (from the textarea) with auto-detected tags
+   * (from filename + MIME). User-entered values take precedence on key
+   * collision so the user can override auto-detected season/episode/etc.
+   */
+  function buildTags(file: File): Tags | undefined {
+    const auto = autoTagsFromFile(file.name, file.type);
+    const user = parseUserTags(tagInput);
+    const merged: Tags = { ...auto, ...user };
+    return Object.keys(merged).length > 0 ? merged : undefined;
+  }
 
   /**
    * Read each file in turn, computing SHA-256 + (for images) a JPEG preview.
@@ -138,6 +153,7 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
           await sdk.updateObjectMetadata(obj);
 
           const shareUrl = sdk.shareObject(obj, SHARE_VALID_UNTIL);
+          const tags = buildTags(p.file);
           await writeSharePost(agent, {
             shareUrl,
             siaKey: obj.id(),
@@ -146,6 +162,7 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
             size: meta.size,
             createdAt: new Date(meta.createdAt).toISOString(),
             ...(p.thumbnail ? { thumbnail: p.thumbnail } : {}),
+            ...(tags ? { tags } : {}),
           });
 
           setActiveUpload((prev) =>
@@ -214,6 +231,17 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
           </button>
         </div>
       )}
+
+      <textarea
+        value={tagInput}
+        onChange={(e) => setTagInput(e.target.value)}
+        placeholder={
+          "Tags (one per line) — e.g.\ntype: tvshow\nname: One Step Beyond\nseason: 1\nepisode: 5\nresolution: 1080p\ntvdb: 76479"
+        }
+        rows={3}
+        disabled={uploading}
+        className="w-full px-3 py-2 text-sm bg-white border border-neutral-300 rounded-lg text-neutral-900 placeholder-neutral-400 focus:outline-none focus:border-green-600 font-mono"
+      />
 
       <label
         onDrop={handleDrop}

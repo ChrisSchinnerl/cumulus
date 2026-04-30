@@ -8,6 +8,7 @@ import {
   writeSharePost,
 } from "../../lib/atproto";
 import { type CumulusEvent, subscribeJetstream } from "../../lib/jetstream";
+import { isEmptyQuery, matchEntry, parseQuery } from "../../lib/tags";
 import { NSID_SHARE_POST, type SharePost } from "../../lib/lexicons";
 import { useAtprotoStore } from "../../stores/atproto";
 import { useAuthStore } from "../../stores/auth";
@@ -180,6 +181,7 @@ export function Feed() {
   const [entries, setEntries] = useState<FeedEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   /**
    * Map of `sourceUri → my save record` for every save currently in the
    * viewer's repo. In the Following tab this drives both (a) detection of
@@ -450,6 +452,27 @@ export function Feed() {
         : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
     }`;
 
+  const parsedQuery = parseQuery(search);
+  const queryEmpty = isEmptyQuery(parsedQuery);
+  const visibleEntries =
+    entries && !queryEmpty
+      ? entries.filter((e) =>
+          matchEntry({ name: e.post.name, tags: e.post.tags }, parsedQuery),
+        )
+      : entries;
+
+  /**
+   * Click handler passed to each FeedItem's tag chips. Appends the chip's
+   * `key:value` to the current search box; if it's already in the query,
+   * leaves it alone (no toggle off — explicit clear via the input).
+   */
+  function handleTagClick(key: string, value: string) {
+    const token = `${key}:${value}`;
+    const existing = search.trim();
+    if (existing.split(/\s+/).includes(token)) return;
+    setSearch(existing ? `${existing} ${token}` : token);
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -479,15 +502,38 @@ export function Feed() {
         </button>
       </div>
 
+      <div className="relative">
+        <input
+          type="text"
+          value={search}
+          onChange={(ev) => setSearch(ev.target.value)}
+          placeholder="Search — type:anime season:1 or just words"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          className="w-full px-3 py-2 text-sm bg-white border border-neutral-300 rounded-lg text-neutral-900 placeholder-neutral-400 focus:outline-none focus:border-green-600"
+        />
+        {search && (
+          <button
+            type="button"
+            onClick={() => setSearch("")}
+            aria-label="Clear search"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 text-lg leading-none"
+          >
+            ×
+          </button>
+        )}
+      </div>
+
       {error && (
         <div className="px-4 py-2.5 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
           {error}
         </div>
       )}
 
-      {entries && entries.length > 0 && (
+      {visibleEntries && visibleEntries.length > 0 && (
         <div className="space-y-3">
-          {entries.map((e) => {
+          {visibleEntries.map((e) => {
             // Compute the per-entry action callbacks. Library tab → always
             // Delete on the entry itself. Following tab → if we've saved
             // it, Delete that *save* (lets the user undo accidental saves);
@@ -520,6 +566,8 @@ export function Feed() {
                 posterDid={e.author.did}
                 sourceUri={e.post.sourceUri}
                 thumbnail={e.post.thumbnail}
+                tags={e.post.tags}
+                onTagClick={handleTagClick}
                 onDelete={onDelete}
                 onSave={onSave}
               />
@@ -533,6 +581,16 @@ export function Feed() {
           Loading feed...
         </p>
       )}
+
+      {entries &&
+        entries.length > 0 &&
+        visibleEntries &&
+        visibleEntries.length === 0 && (
+          <p className="text-sm text-neutral-500 py-8 text-center">
+            No matches for{" "}
+            <code className="text-neutral-700">{search}</code>.
+          </p>
+        )}
 
       {entries && entries.length === 0 && !loading && (
         <p className="text-sm text-neutral-500 py-8 text-center">
