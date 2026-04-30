@@ -4,6 +4,8 @@ A social filesharing app where your files live on [Sia](https://sia.tech) (encry
 
 **Live demo: [cumulus.schinnerl.dev](https://cumulus.schinnerl.dev)**
 
+**Recording: [video](https://github.com/ChrisSchinnerl/cumulus/blob/master/demo.mp4)**
+
 Drop a file or folder → it's encrypted client-side, stored on the Sia network,
 and a record pointing at it is written to your atproto repo. Anyone who follows
 you on Bluesky sees it appear in their cumulus feed.
