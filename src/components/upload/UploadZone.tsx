@@ -89,6 +89,50 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
   }
 
   /**
+   * Bulk-set a tag across every staged file. Replaces any existing pairs
+   * with the same key — call this with `genre: action` and every file
+   * ends up with exactly that one genre, regardless of what they had
+   * before. To preserve multi-value, type the comma list yourself
+   * (`genre: action, drama`).
+   */
+  function applyBulkTag(key: string, value: string) {
+    const k = key.trim().toLowerCase();
+    const v = value.trim();
+    if (!k || !v) return;
+    setStaged((prev) => {
+      if (!prev) return prev;
+      return prev.map((sf) => {
+        const filtered = sf.tags.filter(
+          (p) => p.key.trim().toLowerCase() !== k,
+        );
+        return {
+          ...sf,
+          tags: [...filtered, { key: k, value: v }],
+          expanded: true,
+        };
+      });
+    });
+  }
+
+  /**
+   * Bulk-remove every pair with the given key from every staged file. The
+   * dialog's "remove" picker lists the union of keys across all files —
+   * picking `genre` clears all genre tags from the batch regardless of
+   * each file's specific value.
+   */
+  function removeBulkTag(key: string) {
+    const k = key.trim().toLowerCase();
+    if (!k) return;
+    setStaged((prev) => {
+      if (!prev) return prev;
+      return prev.map((sf) => ({
+        ...sf,
+        tags: sf.tags.filter((p) => p.key.trim().toLowerCase() !== k),
+      }));
+    });
+  }
+
+  /**
    * Recompute auto-detected tags for every staged file and overwrite the
    * inferred keys with fresh values. User-added keys outside the auto-tag
    * set (e.g. `genre`, `mood`, custom tags) are preserved as-is — only the
@@ -472,6 +516,8 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
           onUpdateTag={updateTagRow}
           onRemoveTag={removeTagRow}
           onAutoTag={applyAutoTags}
+          onBulkTag={applyBulkTag}
+          onBulkRemove={removeBulkTag}
         />
       )}
     </div>
@@ -491,6 +537,10 @@ type ReviewDialogProps = {
   onRemoveTag: (fileIdx: number, tagIdx: number) => void;
   /** Apply auto-detected tags to every staged file (filename + MIME hints). */
   onAutoTag: () => void;
+  /** Set `key=value` on every staged file, replacing any existing pairs with the same key. */
+  onBulkTag: (key: string, value: string) => void;
+  /** Remove every pair with the given key from every staged file that has it. */
+  onBulkRemove: (key: string) => void;
 };
 
 /**
@@ -507,6 +557,8 @@ function ReviewDialog({
   onUpdateTag,
   onRemoveTag,
   onAutoTag,
+  onBulkTag,
+  onBulkRemove,
 }: ReviewDialogProps) {
   const sdk = useAuthStore((s) => s.sdk);
   const totalBytes = staged.reduce((acc, sf) => acc + sf.file.size, 0);
@@ -538,6 +590,26 @@ function ReviewDialog({
   }, [sdk]);
 
   const wouldExceed = remaining !== null && siaSize > remaining;
+
+  // Bulk-add tool state — typed key/value applied to every file on submit.
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkKey, setBulkKey] = useState("");
+  const [bulkValue, setBulkValue] = useState("");
+  // Bulk-remove tool state — pick from the union of pairs across all files.
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const [removePicked, setRemovePicked] = useState("");
+
+  /** Union of every distinct key across all staged files (alphabetized). */
+  const allKeys = (() => {
+    const seen = new Set<string>();
+    for (const sf of staged) {
+      for (const p of sf.tags) {
+        const k = p.key.trim().toLowerCase();
+        if (k) seen.add(k);
+      }
+    }
+    return Array.from(seen).sort();
+  })();
 
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: ESC handled via window listener; click-outside-to-dismiss is the dialog idiom
@@ -584,7 +656,7 @@ function ReviewDialog({
               </>
             )}
           </p>
-          <div className="mt-3">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={onAutoTag}
@@ -605,7 +677,131 @@ function ReviewDialog({
               </svg>
               Auto-tag
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setBulkOpen((o) => !o);
+                if (removeOpen) setRemoveOpen(false);
+              }}
+              className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 border border-neutral-300 rounded-lg hover:bg-neutral-50 text-neutral-700 transition-colors"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="w-4 h-4"
+                aria-hidden="true"
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Tag all
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setRemoveOpen((o) => !o);
+                if (bulkOpen) setBulkOpen(false);
+              }}
+              disabled={allKeys.length === 0}
+              className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 border border-neutral-300 rounded-lg hover:bg-neutral-50 text-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="w-4 h-4"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14" />
+              </svg>
+              Remove tag
+            </button>
           </div>
+          {bulkOpen && (
+            <div className="mt-2 flex items-center gap-1.5">
+              <input
+                type="text"
+                value={bulkKey}
+                onChange={(e) => setBulkKey(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    onBulkTag(bulkKey, bulkValue);
+                    setBulkKey("");
+                    setBulkValue("");
+                  }
+                }}
+                placeholder="key"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                className="w-32 shrink-0 px-2 py-1 text-xs bg-white border border-neutral-300 rounded text-neutral-900 placeholder-neutral-400 focus:outline-none focus:border-green-600"
+              />
+              <span className="text-xs text-neutral-400">:</span>
+              <input
+                type="text"
+                value={bulkValue}
+                onChange={(e) => setBulkValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    onBulkTag(bulkKey, bulkValue);
+                    setBulkKey("");
+                    setBulkValue("");
+                  }
+                }}
+                placeholder="value (comma-separated for multi-value)"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                className="flex-1 min-w-0 px-2 py-1 text-xs bg-white border border-neutral-300 rounded text-neutral-900 placeholder-neutral-400 focus:outline-none focus:border-green-600"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  onBulkTag(bulkKey, bulkValue);
+                  setBulkKey("");
+                  setBulkValue("");
+                }}
+                disabled={!bulkKey.trim() || !bulkValue.trim()}
+                className="text-xs px-3 py-1 bg-green-600 hover:bg-green-700 disabled:bg-neutral-200 disabled:text-neutral-400 text-white rounded transition-colors"
+              >
+                Apply
+              </button>
+            </div>
+          )}
+          {removeOpen && (
+            <div className="mt-2 flex items-center gap-1.5">
+              <select
+                value={removePicked}
+                onChange={(e) => setRemovePicked(e.target.value)}
+                className="flex-1 min-w-0 px-2 py-1 text-xs bg-white border border-neutral-300 rounded text-neutral-900 focus:outline-none focus:border-green-600"
+              >
+                <option value="">Pick a key to remove…</option>
+                {allKeys.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!removePicked) return;
+                  onBulkRemove(removePicked);
+                  setRemovePicked("");
+                }}
+                disabled={!removePicked}
+                className="text-xs px-3 py-1 bg-red-600 hover:bg-red-700 disabled:bg-neutral-200 disabled:text-neutral-400 text-white rounded transition-colors"
+              >
+                Remove from all
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
