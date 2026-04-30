@@ -313,7 +313,7 @@ export function FeedItem({
 
   return (
     <>
-    <div className="flex items-start gap-3 py-4">
+    <div className="flex items-start gap-3 p-4 rounded-xl border border-neutral-200/80 bg-white">
       {avatar ? (
         <img
           src={avatar}

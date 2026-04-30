@@ -413,7 +413,7 @@ export function Feed() {
       )}
 
       {entries && entries.length > 0 && (
-        <div className="divide-y divide-neutral-200/80">
+        <div className="space-y-3">
           {entries.map((e) => {
             // Compute the per-entry action callbacks. Library tab → always
             // Delete on the entry itself. Following tab → if we've saved
