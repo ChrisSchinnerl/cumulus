@@ -7,7 +7,7 @@ import {
   SHARE_VALID_UNTIL,
   writeSharePost,
 } from "../../lib/atproto";
-import type { SharePost } from "../../lib/lexicons";
+import { NSID_SHARE_POST, type SharePost } from "../../lib/lexicons";
 import { useAtprotoStore } from "../../stores/atproto";
 import { useAuthStore } from "../../stores/auth";
 import { FeedItem } from "./FeedItem";
@@ -130,31 +130,23 @@ async function pMap<T, R>(
 }
 
 /**
- * Whether a feed entry represents content the viewer "already has." Two
- * cases trigger this:
- *
- * 1. **The post's source is one we've already saved.** The post's "source"
- *    is `post.sourceUri ?? post.uri` — an original post is its own source.
- *    If that URI is in our saved-sources set, we've repinned this content.
- *
- * 2. **The post's source author is us.** A friend's repost of *our* original
- *    has `sourceUri` whose DID is ours; in that case we have the content
- *    natively without ever having saved it.
+ * Whether the source author of an entry is the viewer (i.e. the content
+ * originated from one of the viewer's own posts, even when we're seeing it
+ * via a friend's repost). Used to suppress the Save button on reposts of
+ * our own originals — there's nothing to "save," we already have it.
  */
-function isAlreadyMine(
-  entry: FeedEntry,
-  savedSourceUris: Set<string>,
-  myDid: string | null,
-): boolean {
-  const source = entry.post.sourceUri ?? entry.uri;
-  if (savedSourceUris.has(source)) return true;
+function isSourceAuthorMe(entry: FeedEntry, myDid: string | null): boolean {
   if (!myDid) return false;
+  const source = entry.post.sourceUri ?? entry.uri;
   try {
     return new AtUri(source).host === myDid;
   } catch {
     return false;
   }
 }
+
+/** A reference to one of the viewer's own save records. */
+type MySave = { uri: string; post: SharePost };
 
 /** Newest-first sort over share entries by `createdAt`. */
 function sortByCreatedAtDesc(entries: FeedEntry[]): FeedEntry[] {
@@ -188,13 +180,13 @@ export function Feed() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
-   * Source URIs (the original at-uri of each repinned post) currently in the
-   * viewer's own repo. Used in the Following tab to render "Saved" — paired
-   * with a separate "the source author is me" DID check so we also recognize
-   * reposts of our own originals.
+   * Map of `sourceUri → my save record` for every save currently in the
+   * viewer's repo. In the Following tab this drives both (a) detection of
+   * already-saved entries and (b) the Delete action — we need the *my-side*
+   * record's at-uri to delete, not the friend's post we're looking at.
    */
-  const [savedSourceUris, setSavedSourceUris] = useState<Set<string>>(
-    new Set(),
+  const [savesBySource, setSavesBySource] = useState<Map<string, MySave>>(
+    new Map(),
   );
 
   const refresh = useCallback(async () => {
@@ -205,22 +197,22 @@ export function Feed() {
     try {
       // For Following tab, also load my own records in parallel so we know
       // which entries are already saved. Skipped for Mine tab (the entries
-      // *are* my own, so the question doesn't apply). We collect the
-      // `sourceUri` field from each of my records — that's the at-uri of
-      // the original post the save came from.
-      const mySourcesPromise =
+      // *are* my own, so the question doesn't apply). Build a map keyed by
+      // sourceUri so the Delete action can find the right *my-side* record.
+      const mySavesPromise =
         tab === "following"
           ? listSharePosts(did, 100)
-              .then(
-                (records) =>
-                  new Set(
-                    records
-                      .map((r) => r.value.sourceUri)
-                      .filter((u): u is string => !!u),
-                  ),
-              )
-              .catch(() => new Set<string>())
-          : Promise.resolve(new Set<string>());
+              .then((records) => {
+                const map = new Map<string, MySave>();
+                for (const r of records) {
+                  if (r.value.sourceUri) {
+                    map.set(r.value.sourceUri, { uri: r.uri, post: r.value });
+                  }
+                }
+                return map;
+              })
+              .catch(() => new Map<string, MySave>())
+          : Promise.resolve(new Map<string, MySave>());
 
       const authors = await loadAuthors(did, tab);
       const accumulated: FeedEntry[] = [];
@@ -242,7 +234,7 @@ export function Feed() {
         },
       );
 
-      setSavedSourceUris(await mySourcesPromise);
+      setSavesBySource(await mySavesPromise);
     } catch (e) {
       console.error("feed load failed:", e);
       setError(e instanceof Error ? e.message : "Failed to load feed");
@@ -256,54 +248,74 @@ export function Feed() {
   }, [refresh]);
 
   /**
-   * Delete one of the viewer's own share entries — both the Sia indexer
-   * object and the atproto share record.
+   * Delete one of the viewer's own records — both the Sia indexer object and
+   * the atproto share record. Shared by `handleDelete` (Mine tab) and
+   * `handleUnsave` (Following tab → red Delete on a previously saved post).
    *
-   * Order: indexer first, atproto second. If the indexer call fails, we
-   * abort and leave the atproto record intact so the user can retry. If the
-   * indexer succeeds but the atproto delete fails, the file is already gone
-   * but the orphan record is harmless and self-evident on retry.
-   *
-   * The Sia object key comes from the share record's `siaKey` field. For
-   * legacy records (pre-`siaKey`) we fall back to reconstructing a
-   * PinnedObject from the share URL — this works when `sharedObject(url)`
-   * yields the same id as the originally pinned object.
+   * Order: indexer first, atproto second. If the indexer call fails we
+   * abort and leave the atproto record intact for retry. "Object not found"
+   * from the indexer is treated as success since the delete's intent is
+   * already satisfied. Sia object key comes from `siaKey`; if the record
+   * predates that field, we reconstruct a PinnedObject from the share URL.
    */
-  const handleDelete = useCallback(
-    async (entry: FeedEntry): Promise<void> => {
+  const deleteMyRecord = useCallback(
+    async (uri: string, post: SharePost): Promise<void> => {
       if (!agent || !sdk) throw new Error("Not connected");
-      let siaKey = entry.post.siaKey;
+      let siaKey = post.siaKey;
       if (!siaKey) {
-        const obj = await sdk.sharedObject(entry.post.shareUrl);
+        const obj = await sdk.sharedObject(post.shareUrl);
         siaKey = obj.id();
       }
       try {
         await sdk.deleteObject(siaKey);
       } catch (e) {
-        // Treat "object not found" as success — if the indexer doesn't
-        // know about it, the delete's intent is already satisfied. Lets us
-        // clean up orphan atproto records when the indexer state diverged
-        // (e.g. unpinned via another client, repos restored, etc.).
         const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
         if (!msg.includes("not found")) throw e;
       }
-      await deleteSharePost(agent, entry.uri);
+      await deleteSharePost(agent, uri);
+    },
+    [agent, sdk],
+  );
+
+  /** Mine tab: delete the user's own entry from view + repo + indexer. */
+  const handleDelete = useCallback(
+    async (entry: FeedEntry): Promise<void> => {
+      await deleteMyRecord(entry.uri, entry.post);
       setEntries((prev) =>
         prev ? prev.filter((e) => e.uri !== entry.uri) : prev,
       );
-      // If the deleted record was a save, drop its source URI from the set
-      // so the original re-shows "Save" in Following.
       const sourceUri = entry.post.sourceUri;
       if (sourceUri) {
-        setSavedSourceUris((prev) => {
+        setSavesBySource((prev) => {
           if (!prev.has(sourceUri)) return prev;
-          const next = new Set(prev);
+          const next = new Map(prev);
           next.delete(sourceUri);
           return next;
         });
       }
     },
-    [agent, sdk],
+    [deleteMyRecord],
+  );
+
+  /**
+   * Following tab: undo a save. The friend's post stays in the feed (it's
+   * theirs), but our save record is removed so the button flips back to
+   * green Save.
+   */
+  const handleUnsave = useCallback(
+    async (save: MySave): Promise<void> => {
+      await deleteMyRecord(save.uri, save.post);
+      const sourceUri = save.post.sourceUri;
+      if (sourceUri) {
+        setSavesBySource((prev) => {
+          if (!prev.has(sourceUri)) return prev;
+          const next = new Map(prev);
+          next.delete(sourceUri);
+          return next;
+        });
+      }
+    },
+    [deleteMyRecord],
   );
 
   /**
@@ -333,17 +345,25 @@ export function Feed() {
 
       const { $type: _type, ...rest } = entry.post;
       const sourceUri = rest.sourceUri ?? entry.uri;
-      await writeSharePost(agent, {
+      const newPost: SharePost = {
+        $type: NSID_SHARE_POST,
         ...rest,
         shareUrl: myShareUrl,
         siaKey,
         createdAt: new Date().toISOString(),
         sourceUri,
+      };
+      const result = await writeSharePost(agent, {
+        ...rest,
+        shareUrl: myShareUrl,
+        siaKey,
+        createdAt: newPost.createdAt,
+        sourceUri,
       });
 
-      setSavedSourceUris((prev) => {
-        const next = new Set(prev);
-        next.add(sourceUri);
+      setSavesBySource((prev) => {
+        const next = new Map(prev);
+        next.set(sourceUri, { uri: result.uri, post: newPost });
         return next;
       });
     },
@@ -394,27 +414,44 @@ export function Feed() {
 
       {entries && entries.length > 0 && (
         <div className="divide-y divide-neutral-200/80">
-          {entries.map((e) => (
-            <FeedItem
-              key={e.uri}
-              handle={e.author.handle}
-              displayName={e.author.displayName}
-              avatar={e.author.avatar}
-              name={e.post.name}
-              mimeType={e.post.mimeType}
-              size={e.post.size}
-              createdAt={e.post.createdAt}
-              shareUrl={e.post.shareUrl}
-              posterDid={e.author.did}
-              sourceUri={e.post.sourceUri}
-              thumbnail={e.post.thumbnail}
-              onDelete={tab === "mine" ? () => handleDelete(e) : undefined}
-              onSave={tab === "following" ? () => handleSave(e) : undefined}
-              isSaved={
-                tab === "following" && isAlreadyMine(e, savedSourceUris, did)
-              }
-            />
-          ))}
+          {entries.map((e) => {
+            // Compute the per-entry action callbacks. Mine tab → always
+            // Delete on the entry itself. Following tab → if we've saved
+            // it, Delete that *save* (lets the user undo accidental saves);
+            // if we authored the original, no button (nothing to do); else
+            // Save.
+            const sourceOfP = e.post.sourceUri ?? e.uri;
+            const mySave = savesBySource.get(sourceOfP);
+            const sourceIsMine = isSourceAuthorMe(e, did);
+            const onDelete =
+              tab === "mine"
+                ? () => handleDelete(e)
+                : tab === "following" && mySave
+                  ? () => handleUnsave(mySave)
+                  : undefined;
+            const onSave =
+              tab === "following" && !mySave && !sourceIsMine
+                ? () => handleSave(e)
+                : undefined;
+            return (
+              <FeedItem
+                key={e.uri}
+                handle={e.author.handle}
+                displayName={e.author.displayName}
+                avatar={e.author.avatar}
+                name={e.post.name}
+                mimeType={e.post.mimeType}
+                size={e.post.size}
+                createdAt={e.post.createdAt}
+                shareUrl={e.post.shareUrl}
+                posterDid={e.author.did}
+                sourceUri={e.post.sourceUri}
+                thumbnail={e.post.thumbnail}
+                onDelete={onDelete}
+                onSave={onSave}
+              />
+            );
+          })}
         </div>
       )}
 

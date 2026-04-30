@@ -91,17 +91,12 @@ export type FeedItemProps = {
    */
   onDelete?: () => Promise<void>;
   /**
-   * Optional repin callback. When provided AND `isSaved` is false, a Save
-   * button is rendered. The parent pins the underlying Sia object to the
-   * viewer's indexer and writes a copy of the record to their repo.
+   * Optional repin callback. When provided, a green Save button is rendered.
+   * Mutually exclusive with `onDelete` in practice — once a post is saved,
+   * the parent flips this off and provides `onDelete` instead so the user
+   * can undo the save.
    */
   onSave?: () => Promise<void>;
-  /**
-   * Whether the viewer's repo already contains a record for this same
-   * underlying Sia object. When true, the button reads "Saved" and is
-   * disabled — useful only when `onSave` would otherwise be active.
-   */
-  isSaved?: boolean;
 };
 
 /**
@@ -123,7 +118,6 @@ export function FeedItem({
   thumbnail,
   onDelete,
   onSave,
-  isSaved = false,
 }: FeedItemProps) {
   const sdk = useAuthStore((s) => s.sdk);
   const [downloading, setDownloading] = useState(false);
@@ -244,7 +238,7 @@ export function FeedItem({
   }
 
   async function handleSave() {
-    if (!onSave || saving || isSaved) return;
+    if (!onSave || saving) return;
     setSaving(true);
     setError(null);
     try {
@@ -396,10 +390,10 @@ export function FeedItem({
               <button
                 type="button"
                 onClick={handleSave}
-                disabled={downloading || saving || isSaved}
+                disabled={downloading || saving}
                 className="text-xs px-3 py-1.5 border border-green-200 text-green-700 rounded-lg hover:bg-green-50 disabled:opacity-40 disabled:cursor-default transition-colors"
               >
-                {saving ? "Saving..." : isSaved ? "Saved" : "Save"}
+                {saving ? "Saving..." : "Save"}
               </button>
             )}
             {onDelete && (
