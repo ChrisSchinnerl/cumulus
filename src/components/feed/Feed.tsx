@@ -413,11 +413,19 @@ export function Feed() {
   const handleSave = useCallback(
     async (entry: FeedEntry): Promise<void> => {
       if (!agent || !sdk) throw new Error("Not connected");
-      const obj = await sdk.sharedObject(entry.post.shareUrl);
-      await sdk.pinObject(obj);
-      await sdk.updateObjectMetadata(obj);
-      const myShareUrl = sdk.shareObject(obj, SHARE_VALID_UNTIL);
-      const siaKey = obj.id();
+      const sharedObj = await sdk.sharedObject(entry.post.shareUrl);
+      await sdk.pinObject(sharedObj);
+      await sdk.updateObjectMetadata(sharedObj);
+      const siaKey = sharedObj.id();
+      // Re-fetch the object from *our* indexer. The PinnedObject returned by
+      // `sharedObject(otherUserUrl)` carries the original author's indexer
+      // reference inside it; minting a share URL from that would still depend
+      // on the original — if they delete, our share URL breaks. Fetching by
+      // siaKey from our own indexer gives us a reference rooted in our
+      // account, so the share URL we mint stays valid even after the
+      // original author deletes their record.
+      const myObj = await sdk.object(siaKey);
+      const myShareUrl = sdk.shareObject(myObj, SHARE_VALID_UNTIL);
 
       const { $type: _type, ...rest } = entry.post;
       const sourceUri = rest.sourceUri ?? entry.uri;
