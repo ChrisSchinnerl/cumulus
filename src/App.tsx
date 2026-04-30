@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+
 import { AuthFlow } from "./components/auth/AuthFlow";
 import { BlueskySignIn } from "./components/auth/BlueskySignIn";
 import { LoadingScreen } from "./components/auth/LoadingScreen";
@@ -39,7 +40,6 @@ export default function App() {
   const atprotoInitialized = useAtprotoStore((s) => s.initialized);
   const atprotoInitializing = useAtprotoStore((s) => s.initializing);
   const atprotoSession = useAtprotoStore((s) => s.session);
-  const [feedKey, setFeedKey] = useState(0);
   const [route, setRoute] = useState<Route>(() =>
     parseRoute(window.location.hash),
   );
@@ -69,8 +69,8 @@ export default function App() {
   } else {
     body = (
       <div className="flex-1 p-6 max-w-3xl mx-auto w-full space-y-6">
-        <UploadZone onUploaded={() => setFeedKey((k) => k + 1)} />
-        <Feed key={feedKey} />
+        <UploadZone />
+        <Feed />
       </div>
     );
   }

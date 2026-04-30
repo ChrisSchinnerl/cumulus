@@ -50,19 +50,16 @@ type PreparedFile = {
   thumbnail: string | null;
 };
 
-export type UploadZoneProps = {
-  /** Called after every successful per-file share-record write. Refreshes the feed incrementally. */
-  onUploaded?: () => void;
-};
-
 /**
  * Compose-only dropzone with a review step. Drop file(s) or a folder → opens
  * a dialog listing every file with its size and a foldable tag editor; user
  * adjusts tags then confirms. Confirmed batch goes through one packed Sia
  * upload (amortizing erasure-coding overhead across small files), and one
- * `app.cumulus.share.post` record per file is written.
+ * `app.cumulus.share.post` record per file is written. Live-update of the
+ * feed after upload is handled by the Feed component's own Jetstream
+ * subscription, so we don't need a callback here.
  */
-export function UploadZone({ onUploaded }: UploadZoneProps) {
+export function UploadZone() {
   const sdk = useAuthStore((s) => s.sdk);
   const agent = useAtprotoStore((s) => s.agent);
   const [uploading, setUploading] = useState(false);
@@ -330,7 +327,6 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
           setActiveUpload((prev) =>
             prev ? { ...prev, finalizedCount: i + 1 } : prev,
           );
-          onUploaded?.();
         }
       } catch (e) {
         try {

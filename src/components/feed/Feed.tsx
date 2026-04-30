@@ -181,7 +181,8 @@ export function Feed() {
   const [entries, setEntries] = useState<FeedEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [searchChips, setSearchChips] = useState<string[]>([]);
+  const [searchDraft, setSearchDraft] = useState("");
   /**
    * Map of `sourceUri → my save record` for every save currently in the
    * viewer's repo. In the Following tab this drives both (a) detection of
@@ -452,7 +453,8 @@ export function Feed() {
         : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
     }`;
 
-  const parsedQuery = parseQuery(search);
+  const searchString = [...searchChips, searchDraft].filter(Boolean).join(" ");
+  const parsedQuery = parseQuery(searchString);
   const queryEmpty = isEmptyQuery(parsedQuery);
   const visibleEntries =
     entries && !queryEmpty
@@ -463,14 +465,37 @@ export function Feed() {
 
   /**
    * Click handler passed to each FeedItem's tag chips. Appends the chip's
-   * `key:value` to the current search box; if it's already in the query,
-   * leaves it alone (no toggle off — explicit clear via the input).
+   * `key:value` to the search box's chip list; no-op if already present.
    */
   function handleTagClick(key: string, value: string) {
     const token = `${key}:${value}`;
-    const existing = search.trim();
-    if (existing.split(/\s+/).includes(token)) return;
-    setSearch(existing ? `${existing} ${token}` : token);
+    setSearchChips((prev) => (prev.includes(token) ? prev : [...prev, token]));
+  }
+
+  /** Promote the current draft into a chip if it has content. */
+  function commitDraft() {
+    const t = searchDraft.trim();
+    if (!t) return;
+    setSearchChips((prev) => (prev.includes(t) ? prev : [...prev, t]));
+    setSearchDraft("");
+  }
+
+  function onSearchKeyDown(ev: React.KeyboardEvent<HTMLInputElement>) {
+    if (ev.key === "Enter" || ev.key === " ") {
+      if (searchDraft.trim()) {
+        ev.preventDefault();
+        commitDraft();
+      }
+    } else if (
+      ev.key === "Backspace" &&
+      searchDraft.length === 0 &&
+      searchChips.length > 0
+    ) {
+      // Pop the last chip back into the draft so it's editable.
+      ev.preventDefault();
+      setSearchDraft(searchChips[searchChips.length - 1]);
+      setSearchChips((prev) => prev.slice(0, -1));
+    }
   }
 
   return (
@@ -502,21 +527,48 @@ export function Feed() {
         </button>
       </div>
 
-      <div className="relative">
+      <div className="relative flex flex-wrap items-center gap-1.5 px-2 py-1.5 bg-white border border-neutral-300 rounded-lg focus-within:border-green-600 transition-colors pr-8">
+        {searchChips.map((chip, i) => (
+          <span
+            key={`${chip}:${i}`}
+            className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-neutral-100 text-neutral-700 border border-neutral-200"
+          >
+            {chip}
+            <button
+              type="button"
+              onClick={() =>
+                setSearchChips((prev) => prev.filter((_, idx) => idx !== i))
+              }
+              aria-label={`Remove ${chip}`}
+              className="text-neutral-400 hover:text-red-600 transition-colors leading-none"
+            >
+              ×
+            </button>
+          </span>
+        ))}
         <input
           type="text"
-          value={search}
-          onChange={(ev) => setSearch(ev.target.value)}
-          placeholder="Search — type:anime season:1 or just words"
+          value={searchDraft}
+          onChange={(ev) => setSearchDraft(ev.target.value)}
+          onKeyDown={onSearchKeyDown}
+          onBlur={commitDraft}
+          placeholder={
+            searchChips.length === 0
+              ? "Search — type:tvshow season:1 or just words"
+              : ""
+          }
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}
-          className="w-full px-3 py-2 text-sm bg-white border border-neutral-300 rounded-lg text-neutral-900 placeholder-neutral-400 focus:outline-none focus:border-green-600"
+          className="flex-1 min-w-[120px] outline-none bg-transparent text-sm text-neutral-900 placeholder-neutral-400 py-0.5"
         />
-        {search && (
+        {(searchChips.length > 0 || searchDraft) && (
           <button
             type="button"
-            onClick={() => setSearch("")}
+            onClick={() => {
+              setSearchChips([]);
+              setSearchDraft("");
+            }}
             aria-label="Clear search"
             className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 text-lg leading-none"
           >
@@ -588,7 +640,7 @@ export function Feed() {
         visibleEntries.length === 0 && (
           <p className="text-sm text-neutral-500 py-8 text-center">
             No matches for{" "}
-            <code className="text-neutral-700">{search}</code>.
+            <code className="text-neutral-700">{searchString}</code>.
           </p>
         )}
 
